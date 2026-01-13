@@ -36,3 +36,6 @@ README_files/
 # Temp files
 tmpclaude-*
 *.tmp
+
+# mypy
+.mypy_cache/

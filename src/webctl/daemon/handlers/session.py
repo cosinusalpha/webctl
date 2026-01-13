@@ -3,6 +3,7 @@ Session command handlers.
 """
 
 import asyncio
+from collections import Counter
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -84,6 +85,15 @@ async def handle_session_status(
 
     pages = session_manager.list_pages(session_id)
 
+    # Get console log counts for active page
+    console_counts: dict[str, int] = {}
+    page_info = session_manager.get_active_page_info(session_id)
+    if page_info:
+        counts: Counter[str] = Counter()
+        for log in page_info.console_logs:
+            counts[log["level"]] += 1
+        console_counts = dict(counts)
+
     yield ItemResponse(
         req_id=request.req_id,
         view="status",
@@ -93,6 +103,7 @@ async def handle_session_status(
             "active_page_id": session.active_page_id,
             "page_count": len(pages),
             "pages": pages,
+            "console": console_counts,
         },
     )
     yield DoneResponse(req_id=request.req_id, ok=True)

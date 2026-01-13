@@ -1,8 +1,11 @@
 name: Publish to PyPI
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      # Semver: v1.0.0, v1.0.0-alpha, v1.0.0-rc.1, v1.0.0+build
+      # GitHub Actions only supports glob patterns, not the full semver regex
+      - 'v[0-9]*.[0-9]*.[0-9]*'
 
 jobs:
   publish:

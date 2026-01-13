@@ -12,7 +12,7 @@ webctl stop --daemon
 
 ## Why CLI Instead of MCP?
 
-MCP browser tools have a fundamental problem: **the server controls what enters your context**. With Playwright MCP, every response includes the full accessibility tree plus console messages (default: "info" level). Users report [156KB / 2,847 lines per snapshot](https://github.com/microsoft/playwright-mcp/issues/1274). After 1-2 page queries, your context is full.
+MCP browser tools have a fundamental problem: **the server controls what enters your context**. With Playwright MCP, every response includes the full accessibility tree plus console messages (default: "info" level). After a few page queries, your context is full.
 
 CLI flips this around: **you control what enters context**.
 
@@ -47,6 +47,7 @@ webctl setup            # Downloads Chromium (~150MB)
 ```
 
 Verify it works:
+
 ```bash
 webctl start
 webctl navigate "https://example.com"
@@ -58,10 +59,11 @@ webctl stop --daemon
 <summary>Install from source</summary>
 
 ```bash
-git clone https://github.com/anthropics/webctl
+git clone https://github.com/cosinusalpha/webctl
 cd webctl
 uv sync && uv run webctl setup
 ```
+
 </details>
 
 <details>
@@ -71,6 +73,7 @@ uv sync && uv run webctl setup
 playwright install-deps chromium
 # Or manually: sudo apt-get install libnss3 libatk1.0-0 libatk-bridge2.0-0 ...
 ```
+
 </details>
 
 ## Core Concepts
@@ -111,6 +114,7 @@ webctl --result-only --format jsonl navigate "..." # Pure JSON, final result onl
 ## Commands
 
 ### Navigation
+
 ```bash
 webctl navigate "https://..."   # Go to URL
 webctl back                     # History back
@@ -119,6 +123,7 @@ webctl reload                   # Refresh
 ```
 
 ### Observation
+
 ```bash
 webctl snapshot                           # Full a11y tree
 webctl snapshot --interactive-only        # Buttons, links, inputs only
@@ -130,6 +135,7 @@ webctl screenshot --path shot.png         # Screenshot
 ```
 
 ### Interaction
+
 ```bash
 webctl click 'role=button name~="Submit"'
 webctl type 'role=textbox name~="Email"' "user@example.com"
@@ -142,6 +148,7 @@ webctl upload 'role=button name~="Upload"' --file ./doc.pdf
 ```
 
 ### Wait Conditions
+
 ```bash
 webctl wait network-idle
 webctl wait 'exists:role=button name~="Continue"'
@@ -151,8 +158,9 @@ webctl wait 'url-contains:"/dashboard"'
 ```
 
 ### Session Management
+
 ```bash
-webctl status                   # Current state
+webctl status                   # Current state (includes console error counts)
 webctl save                     # Persist cookies now
 webctl sessions                 # List profiles
 webctl pages                    # List tabs
@@ -160,7 +168,18 @@ webctl focus p2                 # Switch tab
 webctl close-page p1            # Close tab
 ```
 
+### Console Logs
+
+```bash
+webctl console                  # Get last 100 logs
+webctl console --count          # Just counts by level (LLM-friendly)
+webctl console --level error    # Filter to errors only
+webctl console --follow         # Stream new logs continuously
+webctl console -n 50 -l warn    # Last 50 warnings
+```
+
 ### Setup & Config
+
 ```bash
 webctl setup                    # Install browser
 webctl doctor                   # Diagnose installation
@@ -181,6 +200,7 @@ webctl init --agents claude     # Only specific agents
 ```
 
 Or manually add to your agent's config:
+
 ```
 For web browsing, use webctl CLI. Run `webctl agent-prompt` for instructions.
 ```
@@ -196,6 +216,7 @@ For web browsing, use webctl CLI. Run `webctl agent-prompt` for instructions.
 Control a browser via CLI. Start with `webctl start`, end with `webctl stop --daemon`.
 
 **Commands:**
+
 ```bash
 webctl start                              # Open browser
 webctl navigate "URL"                     # Go to URL
@@ -209,11 +230,13 @@ webctl stop --daemon                      # Close browser
 ```
 
 **Query syntax:**
+
 - `role=button` - By ARIA role (button, link, textbox, combobox, checkbox)
 - `name~="partial"` - Partial match (preferred, more robust)
 - `name="exact"` - Exact match
 
 **Example - Login:**
+
 ```bash
 webctl start
 webctl navigate "https://site.com/login"
@@ -223,11 +246,14 @@ webctl wait 'url-contains:"/dashboard"'
 ```
 
 **Tips:**
+
 - Use `--interactive-only` to reduce output (only buttons, links, inputs)
 - Use `name~=` for partial matching (handles minor text changes)
 - Use `webctl query "..."` if element not found - shows suggestions
 - Use `--quiet` to suppress event output
 - Sessions persist cookies - login once, stay logged in
+- Check `webctl status` for console error counts before investigating
+- Use `webctl console --count` for log summary, `--level error` for details
 
 ---
 

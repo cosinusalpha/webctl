@@ -930,6 +930,41 @@ def cmd_prompt_secret(
     asyncio.run(run_command("prompt-secret", {"prompt": prompt, "session": _session}))
 
 
+# === Console Commands ===
+
+
+@app.command("console")
+def cmd_console(
+    follow: bool = typer.Option(False, "--follow", "-f", help="Stream new logs continuously"),
+    level: str | None = typer.Option(
+        None, "--level", "-l", help="Filter by level: log, warn, error, info, debug"
+    ),
+    limit: int = typer.Option(100, "--limit", "-n", help="Max logs to retrieve"),
+    count: bool = typer.Option(False, "--count", "-c", help="Only show counts by level"),
+) -> None:
+    """Get browser console logs.
+
+    Examples:
+        webctl console                    # Get last 100 logs
+        webctl console --level error      # Only errors
+        webctl console --follow           # Stream new logs
+        webctl console -n 50 -l warn      # Last 50 warnings
+        webctl console --count            # Just show counts (LLM-friendly)
+    """
+    asyncio.run(
+        run_command(
+            "console",
+            {
+                "follow": follow,
+                "level": level,
+                "limit": limit,
+                "count_only": count,
+                "session": _session,
+            },
+        )
+    )
+
+
 # === Config Commands ===
 
 # Create a subcommand group for config

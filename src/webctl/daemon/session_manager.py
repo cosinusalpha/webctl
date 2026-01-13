@@ -5,6 +5,7 @@ Session management for webctl daemon.
 import asyncio
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -12,6 +13,7 @@ import aiofiles
 from playwright.async_api import (
     Browser,
     BrowserContext,
+    ConsoleMessage,
     Frame,
     Page,
     Playwright,
@@ -36,6 +38,7 @@ class PageInfo:
     url: str
     kind: Literal["tab", "popup"]
     view_detector: ViewChangeDetector | None = None
+    console_logs: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -166,6 +169,11 @@ class SessionManager:
             lambda frame: asyncio.create_task(self._on_navigation(session, page_id, frame)),
         )
 
+        page.on(
+            "console",
+            lambda msg: self._on_console_message(page_info, msg),
+        )
+
         # Start view change monitoring
         await view_detector.start()
 
@@ -290,6 +298,27 @@ class SessionManager:
 
         return True
 
+    def _on_console_message(self, page_info: PageInfo, msg: ConsoleMessage) -> None:
+        """Handle console message from page."""
+        location = msg.location
+        location_str = None
+        if location:
+            url = location.get("url", "")
+            line = location.get("lineNumber", "")
+            location_str = f"{url}:{line}" if url else None
+
+        log_entry: dict[str, Any] = {
+            "timestamp": datetime.now().isoformat(),
+            "level": msg.type,
+            "text": msg.text,
+            "location": location_str,
+        }
+        page_info.console_logs.append(log_entry)
+
+        # Keep last 1000 logs
+        if len(page_info.console_logs) > 1000:
+            page_info.console_logs = page_info.console_logs[-1000:]
+
     def get_session(self, session_id: str) -> SessionState | None:
         return self._sessions.get(session_id)
 
@@ -298,6 +327,12 @@ class SessionManager:
         if session and session.active_page_id:
             page_info = session.pages.get(session.active_page_id)
             return page_info.page if page_info else None
+        return None
+
+    def get_active_page_info(self, session_id: str) -> PageInfo | None:
+        session = self.get_session(session_id)
+        if session and session.active_page_id:
+            return session.pages.get(session.active_page_id)
         return None
 
     def get_active_page_id(self, session_id: str) -> str | None:

@@ -1,7 +1,7 @@
 [project]
 name = "webctl"
 version = "0.1.0"
-description = "Stateful, agent-first browser interface"
+description = "Browser automation via CLI — for humans and agents"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -20,7 +20,6 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: Browsers",
     "Topic :: Software Development :: Testing",
 ]
-
 dependencies = [
     "playwright>=1.40.0",
     "typer>=0.12.0",
@@ -31,6 +30,11 @@ dependencies = [
     "markdownify>=0.13.0",
     "deepdiff>=7.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/cosinusalpha/webctl"
+Repository = "https://github.com/cosinusalpha/webctl"
+Issues = "https://github.com/cosinusalpha/webctl/issues"
 
 [project.optional-dependencies]
 dev = [
