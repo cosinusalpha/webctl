@@ -4,6 +4,8 @@ IPC client for CLI-to-daemon communication.
 
 import json
 from collections.abc import AsyncIterator
+from types import TracebackType
+from typing import Any
 
 from .messages import (
     DoneResponse,
@@ -32,7 +34,9 @@ class DaemonClient:
         """Connect to the daemon."""
         await self.transport.connect()
 
-    async def send_command(self, command: str, args: dict | None = None) -> AsyncIterator[Response]:
+    async def send_command(
+        self, command: str, args: dict[str, Any] | None = None
+    ) -> AsyncIterator[Response]:
         """Send command and stream responses."""
         request = Request(command=command, args=args or {})
         await self.transport.send_line(request.model_dump_json())
@@ -63,5 +67,10 @@ class DaemonClient:
         await self.connect()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         await self.close()

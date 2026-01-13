@@ -9,7 +9,8 @@ Conditions:
 """
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 from ...protocol.messages import DoneResponse, ErrorResponse, Request, Response
 from ...query.parser import parse_query
@@ -22,7 +23,7 @@ from .registry import register
 
 @register("wait")
 async def handle_wait(
-    request: Request, session_manager: SessionManager, **kwargs
+    request: Request, session_manager: SessionManager, **kwargs: Any
 ) -> AsyncIterator[Response]:
     """Wait for a condition to be met."""
     until = request.args.get("until")
@@ -78,7 +79,7 @@ async def handle_wait(
 
                     items = parse_aria_snapshot(snapshot_str)
                     # Create a simple tree structure for the resolver
-                    tree = {"role": "root", "children": items}
+                    tree: dict[str, Any] = {"role": "root", "children": items}
                     resolver = QueryResolver(tree, strict=False)
                     result = resolver.resolve(query)
                     return result.count > 0
@@ -136,7 +137,7 @@ async def handle_wait(
                     from ...views.a11y import parse_aria_snapshot
 
                     items = parse_aria_snapshot(snapshot_str)
-                    tree = {"role": "root", "children": items}
+                    tree: dict[str, Any] = {"role": "root", "children": items}
                     resolver = QueryResolver(tree, strict=False)
                     result = resolver.resolve(query)
                     if result.count == 0:
@@ -145,6 +146,8 @@ async def handle_wait(
                     element = result.matches[0]
                     role = element.get("role")
                     name = element.get("name")
+                    if role is None:
+                        return False
                     locator = page.get_by_role(role, name=name) if name else page.get_by_role(role)
                     return await locator.first.is_visible()
                 except Exception:
@@ -172,7 +175,7 @@ async def handle_wait(
                     from ...views.a11y import parse_aria_snapshot
 
                     items = parse_aria_snapshot(snapshot_str)
-                    tree = {"role": "root", "children": items}
+                    tree: dict[str, Any] = {"role": "root", "children": items}
                     resolver = QueryResolver(tree, strict=False)
                     result = resolver.resolve(query)
                     return result.count == 0
@@ -219,7 +222,7 @@ async def handle_wait(
                     from ...views.a11y import parse_aria_snapshot
 
                     items = parse_aria_snapshot(snapshot_str)
-                    tree = {"role": "root", "children": items}
+                    tree: dict[str, Any] = {"role": "root", "children": items}
                     resolver = QueryResolver(tree, strict=False)
                     result = resolver.resolve(query)
                     if result.count == 0:
@@ -273,7 +276,9 @@ async def handle_wait(
         yield ErrorResponse(req_id=request.req_id, error=str(e))
 
 
-async def _poll_until(condition: callable, timeout_ms: int, interval_ms: int = 200) -> bool:
+async def _poll_until(
+    condition: Callable[[], Awaitable[bool]], timeout_ms: int, interval_ms: int = 200
+) -> bool:
     """Poll until condition returns True or timeout."""
     deadline = asyncio.get_event_loop().time() + (timeout_ms / 1000)
 

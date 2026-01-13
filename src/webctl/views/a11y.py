@@ -130,9 +130,7 @@ def parse_aria_snapshot(snapshot: str) -> list[dict[str, Any]]:
     return items
 
 
-def _filter_within_scope(
-    items: list[dict[str, Any]], within_query: str
-) -> list[dict[str, Any]]:
+def _filter_within_scope(items: list[dict[str, Any]], within_query: str) -> list[dict[str, Any]]:
     """
     Filter items to only include elements within a specified container.
 
@@ -302,9 +300,7 @@ async def extract_a11y_view(
         yield result
 
 
-async def _get_element_bbox(
-    page: Page, item: dict[str, Any]
-) -> dict[str, float] | None:
+async def _get_element_bbox(page: Page, item: dict[str, Any]) -> dict[str, float] | None:
     """
     Get bounding box for an a11y item.
 
@@ -335,9 +331,7 @@ async def _get_element_bbox(
     return None
 
 
-async def get_a11y_snapshot(
-    page: Page, interesting_only: bool = True
-) -> dict[str, Any] | None:
+async def get_a11y_snapshot(page: Page, interesting_only: bool = True) -> dict[str, Any] | None:
     """Get raw a11y tree snapshot as a dict."""
     try:
         snapshot_str = await page.locator("body").aria_snapshot()

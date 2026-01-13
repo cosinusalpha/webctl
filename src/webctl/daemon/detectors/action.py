@@ -11,9 +11,11 @@ Detect situations requiring user intervention:
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from playwright.async_api import Page
+
+ActionKind = Literal["captcha", "cookie_consent", "terms", "rate_limit", "age_gate", "unknown"]
 
 
 @dataclass
@@ -21,14 +23,14 @@ class ActionRequiredResult:
     """Result of user action detection."""
 
     detected: bool
-    kind: Literal["captcha", "cookie_consent", "terms", "rate_limit", "age_gate", "unknown"]
+    kind: ActionKind
     description: str
     selector_hint: str | None
     confidence: float
 
 
 # Content patterns for different action types
-ACTION_PATTERNS = {
+ACTION_PATTERNS: dict[ActionKind, list[str]] = {
     "captcha": [
         r"\bsolve\s*(the|this)?\s*captcha\b",
         r"\bi('|&#x27;)?m not a robot\b",
@@ -89,7 +91,7 @@ class ActionDetector:
     """Detect user action requirements on pages."""
 
     def __init__(self) -> None:
-        self._patterns = {
+        self._patterns: dict[ActionKind, list[re.Pattern[str]]] = {
             kind: [re.compile(p, re.I) for p in patterns]
             for kind, patterns in ACTION_PATTERNS.items()
         }
@@ -154,7 +156,7 @@ class ActionDetector:
 
     async def _detect_blocking_overlay(self, page: Page) -> bool:
         """Detect if there's a modal/overlay blocking interaction."""
-        return await page.evaluate(
+        result = await page.evaluate(
             """
             () => {
                 // Look for fixed/absolute positioned elements covering viewport
@@ -172,3 +174,4 @@ class ActionDetector:
             }
         """
         )
+        return cast(bool, result)

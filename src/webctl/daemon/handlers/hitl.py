@@ -3,6 +3,7 @@ HITL (Human-In-The-Loop) command handlers.
 """
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 from ...protocol.messages import DoneResponse, ErrorResponse, Request, Response
 from ..session_manager import SessionManager
@@ -11,7 +12,7 @@ from .registry import register
 
 @register("prompt-secret")
 async def handle_prompt_secret(
-    request: Request, session_manager: SessionManager, **kwargs
+    request: Request, session_manager: SessionManager, **kwargs: Any
 ) -> AsyncIterator[Response]:
     """
     Wait for user to enter a secret (e.g., MFA code).
@@ -55,7 +56,7 @@ async def handle_prompt_secret(
 
 @register("ui.attach")
 async def handle_ui_attach(
-    request: Request, session_manager: SessionManager, **kwargs
+    request: Request, session_manager: SessionManager, **kwargs: Any
 ) -> AsyncIterator[Response]:
     """
     Attach the UI (make browser visible).
@@ -92,7 +93,7 @@ async def handle_ui_attach(
 
 @register("ui.detach")
 async def handle_ui_detach(
-    request: Request, session_manager: SessionManager, **kwargs
+    request: Request, session_manager: SessionManager, **kwargs: Any
 ) -> AsyncIterator[Response]:
     """
     Detach the UI (hide browser window).
@@ -120,7 +121,7 @@ async def handle_ui_detach(
 
 @register("wait.user")
 async def handle_wait_user(
-    request: Request, session_manager: SessionManager, **kwargs
+    request: Request, session_manager: SessionManager, **kwargs: Any
 ) -> AsyncIterator[Response]:
     """
     Wait for user to signal completion of manual action.

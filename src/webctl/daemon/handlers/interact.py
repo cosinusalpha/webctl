@@ -187,9 +187,7 @@ async def resolve_element_detailed(
     )
 
 
-async def resolve_element(
-    page: Page, query_str: str, strict: bool = True
-) -> dict[str, Any] | None:
+async def resolve_element(page: Page, query_str: str, strict: bool = True) -> dict[str, Any] | None:
     """Resolve a query to a single element (simple API for backward compat)."""
     result = await resolve_element_detailed(page, query_str, strict)
     if isinstance(result, ResolveSuccess):

@@ -29,6 +29,9 @@ jobs:
       - name: Run ruff format check
         run: uv run ruff format --check src/
 
+      - name: Run mypy
+        run: uv run mypy src/
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:

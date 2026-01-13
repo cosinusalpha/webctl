@@ -5,7 +5,7 @@ RFC SS15: Security Considerations
 
 import fnmatch
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 
@@ -103,7 +103,7 @@ class PolicyConfig:
     policy: DomainPolicy = field(default_factory=DomainPolicy)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "PolicyConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "PolicyConfig":
         """Create from dictionary (e.g., from config file)."""
         if not data:
             return cls()

@@ -103,9 +103,7 @@ class QueryTransformer(Transformer[Token, QueryExpr]):
             else:
                 filters.append(item)
 
-        result: QueryExpr = (
-            filters[0] if len(filters) == 1 else AndExpr(children=tuple(filters))
-        )
+        result: QueryExpr = filters[0] if len(filters) == 1 else AndExpr(children=tuple(filters))
 
         # Apply modifiers (in reverse order for proper nesting)
         for mod_type, mod_value in reversed(modifiers):

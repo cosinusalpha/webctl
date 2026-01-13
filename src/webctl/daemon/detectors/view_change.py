@@ -197,9 +197,7 @@ class ViewChangeDetector:
             count += self._count_nodes(child)
         return count
 
-    def _count_changes(
-        self, old: dict[str, Any] | None, new: dict[str, Any] | None
-    ) -> int | None:
+    def _count_changes(self, old: dict[str, Any] | None, new: dict[str, Any] | None) -> int | None:
         """Estimate number of changed nodes."""
         if not old or not new:
             return None
@@ -209,9 +207,7 @@ class ViewChangeDetector:
         return abs(new_count - old_count)
 
 
-async def wait_for_view_change(
-    page: Page, timeout_ms: int = 30000, view: str = "a11y"
-) -> bool:
+async def wait_for_view_change(page: Page, timeout_ms: int = 30000, view: str = "a11y") -> bool:
     """
     Wait until the view changes.
     Used for: wait --until view-changed:a11y

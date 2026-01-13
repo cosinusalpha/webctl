@@ -4,6 +4,7 @@ Navigation command handlers.
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import Any
 
 from ...protocol.messages import DoneResponse, ErrorResponse, Request, Response
 from ..detectors.cookie_banner import dismiss_cookie_banner
@@ -17,7 +18,7 @@ async def handle_navigate(
     request: Request,
     session_manager: SessionManager,
     event_emitter: EventEmitter,
-    **kwargs,
+    **kwargs: Any,
 ) -> AsyncIterator[Response]:
     """Navigate to a URL."""
     url = request.args.get("url")
@@ -76,7 +77,7 @@ async def handle_navigate(
         # Emit navigation finished event
         await event_emitter.emit_navigation_finished(page.url, page_id)
 
-        summary = {"url": page.url, "title": await page.title()}
+        summary: dict[str, Any] = {"url": page.url, "title": await page.title()}
         if cookie_result.dismissed:
             summary["cookie_banner_dismissed"] = True
 
@@ -91,7 +92,7 @@ async def handle_navigate(
 
 @register("back")
 async def handle_back(
-    request: Request, session_manager: SessionManager, **kwargs
+    request: Request, session_manager: SessionManager, **kwargs: Any
 ) -> AsyncIterator[Response]:
     """Go back in history."""
     session_id = request.args.get("session", "default")
@@ -118,7 +119,7 @@ async def handle_back(
 
 @register("forward")
 async def handle_forward(
-    request: Request, session_manager: SessionManager, **kwargs
+    request: Request, session_manager: SessionManager, **kwargs: Any
 ) -> AsyncIterator[Response]:
     """Go forward in history."""
     session_id = request.args.get("session", "default")
@@ -145,7 +146,7 @@ async def handle_forward(
 
 @register("reload")
 async def handle_reload(
-    request: Request, session_manager: SessionManager, **kwargs
+    request: Request, session_manager: SessionManager, **kwargs: Any
 ) -> AsyncIterator[Response]:
     """Reload the current page."""
     session_id = request.args.get("session", "default")

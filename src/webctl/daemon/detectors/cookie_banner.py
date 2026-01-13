@@ -8,6 +8,7 @@ from blocking page interactions.
 import asyncio
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from playwright.async_api import Page
 
@@ -19,7 +20,7 @@ class CookieBannerResult:
     detected: bool
     dismissed: bool
     method: str | None  # How it was dismissed
-    details: dict
+    details: dict[str, Any]
 
 
 # Common cookie consent button patterns (accept/agree)
@@ -118,7 +119,7 @@ class CookieBannerDismisser:
 
         Returns result indicating whether a banner was found and dismissed.
         """
-        details: dict = {}
+        details: dict[str, Any] = {}
 
         # Strategy 1: Find and click accept button via a11y tree
         try:
@@ -290,7 +291,7 @@ class CookieBannerDismisser:
             details=details,
         )
 
-    def _find_accept_button(self, snapshot_str: str) -> dict | None:
+    def _find_accept_button(self, snapshot_str: str) -> dict[str, str] | None:
         """Find accept/agree button in a11y snapshot."""
         # Look for buttons that match accept patterns
         button_pattern = re.compile(r'button\s+"([^"]+)"', re.I)
@@ -303,14 +304,13 @@ class CookieBannerDismisser:
 
         return None
 
-    async def _click_button(self, page: Page, button: dict) -> bool:
+    async def _click_button(self, page: Page, button: dict[str, str]) -> bool:
         """Click a button by role and name."""
         try:
-            role = button.get("role", "button")
             name = button.get("name")
 
             if name:
-                locator = page.get_by_role(role, name=name)
+                locator = page.get_by_role("button", name=name)
             else:
                 return False
 

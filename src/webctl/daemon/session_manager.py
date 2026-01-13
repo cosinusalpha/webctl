@@ -18,14 +18,12 @@ from playwright.async_api import (
     async_playwright,
 )
 
-from .detectors.view_change import ViewChangeEvent
-
 from ..config import get_profile_dir
 from ..security.domain_policy import DomainPolicy
 from .detectors.action import ActionDetector
 from .detectors.auth import AuthDetector
 from .detectors.cookie_banner import CookieBannerDismisser
-from .detectors.view_change import ViewChangeDetector
+from .detectors.view_change import ViewChangeDetector, ViewChangeEvent
 from .event_emitter import EventEmitter
 
 

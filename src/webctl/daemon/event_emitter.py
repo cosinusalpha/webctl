@@ -19,7 +19,7 @@ class EventEmitter:
         self._subscribers: list[EventCallback] = []
         self._event_queue: asyncio.Queue[EventResponse] = asyncio.Queue()
         self._running = False
-        self._broadcast_task: asyncio.Task | None = None
+        self._broadcast_task: asyncio.Task[None] | None = None
 
     def subscribe(self, callback: EventCallback) -> None:
         """Subscribe to events."""
