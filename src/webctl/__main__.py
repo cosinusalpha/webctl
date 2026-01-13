@@ -1,0 +1,6 @@
+"""Entry point for python -m webctl."""
+
+from .cli.app import app
+
+if __name__ == "__main__":
+    app()
