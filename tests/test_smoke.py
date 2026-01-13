@@ -5,13 +5,23 @@ These tests verify that the basic functionality works end-to-end.
 Run with: uv run pytest tests/test_smoke.py -v
 """
 
+import json
 import os
+import re
 import subprocess
 import sys
 import time
-import json
-import pytest
 from pathlib import Path
+
+import pytest
+
+# Regex to strip ANSI escape codes
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    return ANSI_ESCAPE.sub("", text)
 
 
 # Helper to run webctl commands
@@ -31,6 +41,13 @@ def run_webctl(*args, timeout=30, check=True) -> subprocess.CompletedProcess:
         env=env,
         encoding="utf-8",
         errors="replace",
+    )
+    # Strip ANSI codes from output (Typer/Rich may not respect NO_COLOR for help)
+    result = subprocess.CompletedProcess(
+        args=result.args,
+        returncode=result.returncode,
+        stdout=strip_ansi(result.stdout),
+        stderr=strip_ansi(result.stderr),
     )
     if check and result.returncode != 0:
         print(f"STDOUT: {result.stdout}")
@@ -193,7 +210,7 @@ class TestBrowserInteraction:
         result = run_webctl("--result-only", "--format", "jsonl", "navigate", "https://example.com")
         assert result.returncode == 0
         # Should have exactly one line with done
-        lines = [l for l in result.stdout.strip().split("\n") if l]
+        lines = [line for line in result.stdout.strip().split("\n") if line]
         assert len(lines) == 1
         data = json.loads(lines[0])
         assert data["type"] == "done"
