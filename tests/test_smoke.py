@@ -102,8 +102,12 @@ def browser_session():
     run_webctl("stop", "--daemon", check=False)
     time.sleep(0.5)
 
-    # Start fresh session
-    result = run_webctl("start", timeout=30)
+    # Start fresh session - use headless mode on CI
+    start_args = ["start"]
+    if os.environ.get("CI"):
+        start_args.extend(["--mode", "unattended"])
+
+    result = run_webctl(*start_args, timeout=30)
     assert result.returncode == 0, f"Failed to start: {result.stderr}"
 
     yield
@@ -167,7 +171,7 @@ class TestBrowserInteraction:
         run_webctl("navigate", "https://example.com")
 
         # Example.com has "More information..." link
-        result = run_webctl("click", 'role=link')
+        result = run_webctl("click", "role=link")
         assert result.returncode == 0
         assert "clicked" in result.stdout.lower() or "OK" in result.stdout
 
@@ -238,7 +242,11 @@ class TestErrorHandling:
         assert result.returncode != 0
         # Should have error message with suggestions
         output = result.stdout + result.stderr
-        assert "no_match" in output.lower() or "not found" in output.lower() or "error" in output.lower()
+        assert (
+            "no_match" in output.lower()
+            or "not found" in output.lower()
+            or "error" in output.lower()
+        )
 
     def test_invalid_query_syntax(self):
         """Invalid query syntax gives helpful error."""

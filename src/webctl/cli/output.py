@@ -5,6 +5,7 @@ Supports JSONL and human-readable key-value formats.
 """
 
 import json
+import os
 import sys
 from typing import Any
 
@@ -12,8 +13,11 @@ from rich.console import Console
 from rich.json import JSON
 from rich.panel import Panel
 
-console = Console(legacy_windows=False)
-error_console = Console(stderr=True, legacy_windows=False)
+# Respect NO_COLOR environment variable
+_no_color = os.environ.get("NO_COLOR", "") != ""
+
+console = Console(legacy_windows=False, no_color=_no_color)
+error_console = Console(stderr=True, legacy_windows=False, no_color=_no_color)
 
 
 class OutputFormatter:
@@ -27,10 +31,11 @@ class OutputFormatter:
         result_only: bool = False,
     ):
         self.format = format
-        self.color = color
+        # Respect NO_COLOR environment variable
+        self.color = color and not _no_color
         self.quiet = quiet  # Suppress events
         self.result_only = result_only  # Only output done/error
-        self._console = Console(force_terminal=color, legacy_windows=False)
+        self._console = Console(force_terminal=self.color, legacy_windows=False, no_color=_no_color)
 
     def output(self, data: dict[str, Any]) -> None:
         """Output data in the configured format."""

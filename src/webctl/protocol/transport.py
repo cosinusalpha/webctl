@@ -162,76 +162,116 @@ class NamedPipeClientTransport(Transport):
         return self._writer is not None and not self._writer.is_closing()
 
 
-# === Unix Socket Transport ===
+# === Unix Socket Transport (non-Windows only) ===
 
+if sys.platform != "win32":
 
-class UnixSocketServerTransport(TransportServer):
-    """Unix domain socket server (daemon side)."""
+    class UnixSocketServerTransport(TransportServer):  # noqa: E301
+        """Unix domain socket server (daemon side)."""
 
-    def __init__(self, session_id: str, client_handler: ClientHandler) -> None:
-        runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
-        self.socket_path = runtime_dir / f"webctl-{session_id}.sock"
-        self._server: asyncio.Server | None = None
-        self._client_handler = client_handler
+        def __init__(self, session_id: str, client_handler: ClientHandler) -> None:
+            runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
+            self.socket_path = runtime_dir / f"webctl-{session_id}.sock"
+            self._server: asyncio.Server | None = None
+            self._client_handler = client_handler
 
-    async def start(self) -> None:
-        # Remove stale socket
-        if self.socket_path.exists():
-            self.socket_path.unlink()
+        async def start(self) -> None:
+            # Remove stale socket
+            if self.socket_path.exists():
+                self.socket_path.unlink()
 
-        self._server = await asyncio.start_unix_server(  # type: ignore[attr-defined]
-            self._handle_client, path=str(self.socket_path)
-        )
+            self._server = await asyncio.start_unix_server(
+                self._handle_client, path=str(self.socket_path)
+            )
 
-    async def _handle_client(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
-        connection = StreamClientConnection(reader, writer)
-        await self._client_handler(connection)
+        async def _handle_client(
+            self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            connection = StreamClientConnection(reader, writer)
+            await self._client_handler(connection)
 
-    async def close(self) -> None:
-        if self._server:
-            self._server.close()
-            await self._server.wait_closed()
-        if self.socket_path.exists():
-            self.socket_path.unlink()
+        async def close(self) -> None:
+            if self._server:
+                self._server.close()
+                await self._server.wait_closed()
+            if self.socket_path.exists():
+                self.socket_path.unlink()
 
-    def get_address(self) -> str:
-        return str(self.socket_path)
+        def get_address(self) -> str:
+            return str(self.socket_path)
 
+    class UnixSocketClientTransport(Transport):
+        """Unix domain socket client (CLI side)."""
 
-class UnixSocketClientTransport(Transport):
-    """Unix domain socket client (CLI side)."""
+        def __init__(self, session_id: str):
+            runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
+            self.socket_path = runtime_dir / f"webctl-{session_id}.sock"
+            self._reader: asyncio.StreamReader | None = None
+            self._writer: asyncio.StreamWriter | None = None
 
-    def __init__(self, session_id: str):
-        runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
-        self.socket_path = runtime_dir / f"webctl-{session_id}.sock"
-        self._reader: asyncio.StreamReader | None = None
-        self._writer: asyncio.StreamWriter | None = None
+        async def connect(self) -> None:
+            self._reader, self._writer = await asyncio.open_unix_connection(
+                path=str(self.socket_path)
+            )
 
-    async def connect(self) -> None:
-        self._reader, self._writer = await asyncio.open_unix_connection(  # type: ignore[attr-defined]
-            path=str(self.socket_path)
-        )
+        async def send_line(self, data: str) -> None:
+            if self._writer:
+                self._writer.write((data + "\n").encode())
+                await self._writer.drain()
 
-    async def send_line(self, data: str) -> None:
-        if self._writer:
-            self._writer.write((data + "\n").encode())
-            await self._writer.drain()
+        async def recv_line(self) -> str:
+            if self._reader:
+                line = await self._reader.readline()
+                return line.decode().rstrip("\n")
+            return ""
 
-    async def recv_line(self) -> str:
-        if self._reader:
-            line = await self._reader.readline()
-            return line.decode().rstrip("\n")
-        return ""
+        async def close(self) -> None:
+            if self._writer:
+                self._writer.close()
+                await self._writer.wait_closed()
 
-    async def close(self) -> None:
-        if self._writer:
-            self._writer.close()
-            await self._writer.wait_closed()
+        def is_connected(self) -> bool:
+            return self._writer is not None and not self._writer.is_closing()
 
-    def is_connected(self) -> bool:
-        return self._writer is not None and not self._writer.is_closing()
+else:
+    # Stub classes for Windows - these exist for type checking but are never used
+    # (Windows always uses TCP transport)
+
+    class UnixSocketServerTransport(TransportServer):
+        """Stub for Windows - not used at runtime."""
+
+        def __init__(self, session_id: str, client_handler: ClientHandler) -> None:
+            raise NotImplementedError("Unix sockets not available on Windows")
+
+        async def start(self) -> None:
+            raise NotImplementedError("Unix sockets not available on Windows")
+
+        async def close(self) -> None:
+            raise NotImplementedError("Unix sockets not available on Windows")
+
+        def get_address(self) -> str:
+            raise NotImplementedError("Unix sockets not available on Windows")
+
+    class UnixSocketClientTransport(Transport):
+        """Stub for Windows - not used at runtime."""
+
+        def __init__(self, session_id: str) -> None:
+            raise NotImplementedError("Unix sockets not available on Windows")
+
+        async def connect(self) -> None:
+            raise NotImplementedError("Unix sockets not available on Windows")
+
+        async def send_line(self, data: str) -> None:
+            raise NotImplementedError("Unix sockets not available on Windows")
+
+        async def recv_line(self) -> str:
+            raise NotImplementedError("Unix sockets not available on Windows")
+
+        async def close(self) -> None:
+            raise NotImplementedError("Unix sockets not available on Windows")
+
+        def is_connected(self) -> bool:
+            raise NotImplementedError("Unix sockets not available on Windows")
 
 
 # === TCP Transport (Fallback - RFC SS5.1) ===
@@ -346,14 +386,15 @@ def get_server_transport(
     transport_type: TransportType | None = None,
 ) -> TransportServer:
     """Get appropriate server transport for platform."""
-    # Use TCP as the default cross-platform solution
-    if transport_type == TransportType.TCP or sys.platform == "win32":
+    # Windows always uses TCP
+    if sys.platform == "win32":
         return TCPServerTransport(session_id, client_handler)
 
-    if transport_type == TransportType.UNIX_SOCKET or sys.platform != "win32":
-        return UnixSocketServerTransport(session_id, client_handler)
+    # Non-Windows: use Unix socket unless TCP explicitly requested
+    if transport_type == TransportType.TCP:
+        return TCPServerTransport(session_id, client_handler)
 
-    return TCPServerTransport(session_id, client_handler)
+    return UnixSocketServerTransport(session_id, client_handler)
 
 
 def get_client_transport(
@@ -362,11 +403,12 @@ def get_client_transport(
     tcp_port: int | None = None,
 ) -> Transport:
     """Get appropriate client transport for platform."""
-    # Use TCP as the default cross-platform solution
-    if transport_type == TransportType.TCP or sys.platform == "win32":
+    # Windows always uses TCP
+    if sys.platform == "win32":
         return TCPClientTransport(session_id, port=tcp_port)
 
-    if transport_type == TransportType.UNIX_SOCKET or sys.platform != "win32":
-        return UnixSocketClientTransport(session_id)
+    # Non-Windows: use Unix socket unless TCP explicitly requested
+    if transport_type == TransportType.TCP:
+        return TCPClientTransport(session_id, port=tcp_port)
 
-    return TCPClientTransport(session_id, port=tcp_port)
+    return UnixSocketClientTransport(session_id)

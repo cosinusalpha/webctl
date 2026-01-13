@@ -64,6 +64,9 @@ jobs:
 
       - name: Run tests
         run: uv run pytest tests/ -v --tb=short
+        env:
+          CI: "true"
+          NO_COLOR: "1"
 
   build:
     runs-on: ubuntu-latest
