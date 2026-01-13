@@ -1,0 +1,77 @@
+[project]
+name = "webctl"
+version = "0.1.0"
+description = "Stateful, agent-first browser interface"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "cosinusalpha", email = "42695699+cosinusalpha@users.noreply.github.com" }
+]
+keywords = ["browser", "automation", "agent", "cli", "web"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+    "Topic :: Software Development :: Testing",
+]
+
+dependencies = [
+    "playwright>=1.40.0",
+    "typer>=0.12.0",
+    "rich>=13.0.0",
+    "lark>=1.1.0",
+    "pydantic>=2.0.0",
+    "aiofiles>=24.0.0",
+    "markdownify>=0.13.0",
+    "deepdiff>=7.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-playwright>=0.5.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    "types-aiofiles>=24.0.0",
+]
+
+[project.scripts]
+webctl = "webctl.cli.app:app"
+webctld = "webctl.daemon.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/webctl"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = [
+    "E501",    # Line length handled by formatter; remaining are embedded JS strings
+    "SIM102",  # Nested ifs can be more readable
+    "SIM105",  # try/except/pass is intentional in event handlers
+    "UP007",   # Union[] is fine, X | Y requires Python 3.10+
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
