@@ -279,7 +279,3 @@ webctl wait 'url-contains:"/dashboard"'
 ## License
 
 MIT
-
----
-
-Built with Playwright and Python.
