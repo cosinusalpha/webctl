@@ -384,15 +384,16 @@ def get_server_transport(
     session_id: str,
     client_handler: ClientHandler,
     transport_type: TransportType | None = None,
+    tcp_port: int | None = None,
 ) -> TransportServer:
     """Get appropriate server transport for platform."""
     # Windows always uses TCP
     if sys.platform == "win32":
-        return TCPServerTransport(session_id, client_handler)
+        return TCPServerTransport(session_id, client_handler, port=tcp_port)
 
     # Non-Windows: use Unix socket unless TCP explicitly requested
     if transport_type == TransportType.TCP:
-        return TCPServerTransport(session_id, client_handler)
+        return TCPServerTransport(session_id, client_handler, port=tcp_port)
 
     return UnixSocketServerTransport(session_id, client_handler)
 

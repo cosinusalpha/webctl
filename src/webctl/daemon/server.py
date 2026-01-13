@@ -39,12 +39,13 @@ class DaemonServer:
         self._transport: TransportServer | None = None
         self._running = False
         self._idle_timeout = self.config.idle_timeout or DEFAULT_IDLE_TIMEOUT
-        self._last_activity = asyncio.get_event_loop().time()
+        self._last_activity: float = 0.0  # Will be set when event loop starts
         self._client_count = 0
 
     async def start(self) -> None:
         """Start the daemon server."""
         self._running = True
+        self._last_activity = asyncio.get_running_loop().time()
 
         # Start event emitter
         await self._event_emitter.start()
@@ -56,7 +57,9 @@ class DaemonServer:
         elif self.config.transport == "socket":
             transport_type = TransportType.UNIX_SOCKET
 
-        self._transport = get_server_transport(self.session_id, self._handle_client, transport_type)
+        self._transport = get_server_transport(
+            self.session_id, self._handle_client, transport_type, self.config.tcp_port
+        )
         await self._transport.start()
 
         print(f"webctl daemon started on {self._transport.get_address()}")
@@ -90,7 +93,7 @@ class DaemonServer:
     async def _handle_client(self, connection: ClientConnection) -> None:
         """Handle a client connection."""
         self._client_count += 1
-        self._last_activity = asyncio.get_event_loop().time()
+        self._last_activity = asyncio.get_running_loop().time()
 
         # Subscribe to events
         async def send_event(event: EventResponse) -> None:
@@ -105,7 +108,7 @@ class DaemonServer:
                 if line is None:
                     break
 
-                self._last_activity = asyncio.get_event_loop().time()
+                self._last_activity = asyncio.get_running_loop().time()
 
                 try:
                     # Parse request
@@ -150,7 +153,7 @@ class DaemonServer:
             await asyncio.sleep(60)  # Check every minute
 
             if self._client_count == 0:
-                idle_time = asyncio.get_event_loop().time() - self._last_activity
+                idle_time = asyncio.get_running_loop().time() - self._last_activity
                 if idle_time > self._idle_timeout:
                     print(f"Idle timeout ({self._idle_timeout}s) reached, shutting down")
                     await self.stop()
