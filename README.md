@@ -10,6 +10,10 @@ webctl snapshot --interactive-only --limit 20
 webctl stop --daemon
 ```
 
+## Integrations
+
+- ![claude-skills](https://github.com/oaustegard/claude-skills) – A set of skills for Claude Desktop that includes a `webctl` implementation for browser control. Check out the ![v0.0.1 release](https://github.com/oaustegard/claude-skills/releases/tag/using-webctl-v0.0.1).
+
 ## Why CLI Instead of MCP?
 
 MCP browser tools have a fundamental problem: **the server controls what enters your context**. With Playwright MCP, every response includes the full accessibility tree plus console messages (default: "info" level). After a few page queries, your context is full.
