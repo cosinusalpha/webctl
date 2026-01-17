@@ -3,20 +3,23 @@
 **Browser automation for AI agents and humans, built on the command line.**
 
 ```bash
+# 1. Install
+pip install webctl
+
+# 2. Auto-configure your agent (Creates CLAUDE.md, GEMINI.md system prompts)
+webctl init
+
+# 3. Start browsing
 webctl start
 webctl navigate "https://google.com"
-webctl type 'role=combobox name~="Search"' "best restaurants nearby" --submit
-webctl snapshot --interactive-only --limit 20
-webctl stop --daemon
+webctl snapshot --interactive-only
 ```
 
-## Integrations
-
-- ![claude-skills](https://github.com/oaustegard/claude-skills) – A set of skills for Claude Desktop that includes a `webctl` implementation for browser control. Check out the ![v0.0.1 release](https://github.com/oaustegard/claude-skills/releases/tag/using-webctl-v0.0.1).
+**`webctl init` automatically generates the system prompts your agent needs to drive the browser.**
 
 ## Why CLI Instead of MCP?
 
-MCP browser tools have a fundamental problem: **the server controls what enters your context**. With Playwright MCP, every response includes the full accessibility tree plus console messages (default: "info" level). After a few page queries, your context is full.
+MCP browser tools have a fundamental problem: **the server controls what enters your context**. With Playwright MCP, every response includes the full accessibility tree plus console messages. After a few page queries, your context window is full.
 
 CLI flips this around: **you control what enters context**.
 
@@ -28,44 +31,62 @@ webctl snapshot --within "role=main"               # Skip nav, footer, ads
 # Pipe through Unix tools
 webctl snapshot | grep -i "submit"                 # Find specific elements
 webctl --format jsonl snapshot | jq '.data.role'   # Extract with jq
-webctl snapshot | head -50                         # Truncate output
 ```
 
 Beyond filtering, CLI gives you:
 
-| Capability | CLI | MCP |
-|------------|-----|-----|
-| **Filter output** | Built-in flags + grep/jq/head | Server decides |
-| **Debug** | Run same command as agent | Opaque |
-| **Cache** | `webctl snapshot > cache.txt` | Every call hits server |
-| **Script** | Save to .sh, version control | Ephemeral |
-| **Timeout** | `timeout 30 webctl ...` | Internal only |
-| **Parallelize** | `parallel`, `xargs`, `&` | Server-dependent |
-| **Human takeover** | Same commands | Different interface |
+| Capability         | CLI                           | MCP                    |
+|--------------------|-------------------------------|------------------------|
+| **Filter output**  | Built-in flags + grep/jq/head | Server decides         |
+| **Debug**          | Run same command as agent     | Opaque                 |
+| **Cache & Cost**   | `webctl snapshot > cache.txt` | Every call hits server |
+| **Script**         | Save to .sh, version control  | Ephemeral              |
+| **Human takeover** | Same commands                 | Different interface    |
 
-## Quick Start
+---
+
+## Agent Integration
+
+**Step 1: Install**
 
 ```bash
-pip install webctl      # Requires Python 3.11+
-webctl setup            # Downloads Chromium (~150MB)
+pip install webctl
+webctl setup  # Downloads Chromium
 ```
 
-Verify it works:
+**Step 2: Generate Prompts**
+Run the init command to create the instruction files (CLAUDE.md, etc) for your agent:
 
 ```bash
-webctl start
+webctl init
+```
+
+**Step 3: Add to Config**
+If you aren't using an auto-detecting agent, simply add this to your system prompt:
+
+> For web browsing, use webctl CLI. Run `webctl agent-prompt` for instructions.
+
+*Note: If a browser MCP is already configured, disable it to avoid conflicts.*
+
+---
+
+## Quick Start (Human Usage)
+
+Verify the installation works by driving it yourself:
+
+```bash
+webctl start                    # Opens visible browser window
 webctl navigate "https://example.com"
 webctl snapshot --interactive-only
-webctl stop --daemon
+webctl stop --daemon            # Closes browser and daemon
 ```
 
 <details>
-<summary>Install from source</summary>
+<summary>Global installation with `uv`</summary>
 
 ```bash
-git clone https://github.com/cosinusalpha/webctl
-cd webctl
-uv sync && uv run webctl setup
+uv tool install webctl
+uv tool run webctl
 ```
 
 </details>
@@ -75,10 +96,12 @@ uv sync && uv run webctl setup
 
 ```bash
 playwright install-deps chromium
-# Or manually: sudo apt-get install libnss3 libatk1.0-0 libatk-bridge2.0-0 ...
+# Or manually install libraries listed in Playwright documentation
 ```
 
 </details>
+
+---
 
 ## Core Concepts
 
@@ -88,9 +111,8 @@ Browser stays open across commands. Cookies persist to disk.
 
 ```bash
 webctl start                    # Visible browser
-webctl start --mode unattended  # Headless
+webctl start --mode unattended  # Headless (invisible)
 webctl -s work start            # Named profile (separate cookies)
-webctl stop --daemon            # Shutdown everything
 ```
 
 ### Element Queries
@@ -100,9 +122,7 @@ Semantic targeting based on ARIA roles - stable across CSS refactors:
 ```bash
 role=button                     # Any button
 role=button name="Submit"       # Exact match
-role=button name~="Submit"      # Contains (preferred)
-role=textbox name~="Email"      # Input field
-role=link name~="Sign in"       # Link
+role=button name~="Submit"      # Contains text (preferred)
 ```
 
 ### Output Control
@@ -110,32 +130,22 @@ role=link name~="Sign in"       # Link
 ```bash
 webctl snapshot                                    # Human-readable
 webctl --quiet navigate "..."                      # Suppress events
-webctl --result-only --format jsonl navigate "..." # Pure JSON, final result only
+webctl --result-only --format jsonl navigate "..." # Pure JSON
 ```
 
 ---
 
 ## Commands
 
-### Navigation
+### Navigation & Observation
 
 ```bash
-webctl navigate "https://..."   # Go to URL
-webctl back                     # History back
-webctl forward                  # History forward
-webctl reload                   # Refresh
-```
-
-### Observation
-
-```bash
-webctl snapshot                           # Full a11y tree
+webctl navigate "https://..."
+webctl back / forward / reload
 webctl snapshot --interactive-only        # Buttons, links, inputs only
-webctl snapshot --limit 30                # Cap output
 webctl snapshot --within "role=main"      # Scope to container
-webctl snapshot --roles "button,link"     # Filter by role
-webctl query "role=button name~=Submit"   # Debug query, get suggestions
-webctl screenshot --path shot.png         # Screenshot
+webctl query "role=button name~=Submit"   # Debug query
+webctl screenshot --path shot.png
 ```
 
 ### Interaction
@@ -143,12 +153,11 @@ webctl screenshot --path shot.png         # Screenshot
 ```bash
 webctl click 'role=button name~="Submit"'
 webctl type 'role=textbox name~="Email"' "user@example.com"
-webctl type 'role=textbox name~="Search"' "query" --submit  # Type + Enter
+webctl type 'role=textbox name~="Search"' "query" --submit
 webctl select 'role=combobox name~="Country"' --label "Germany"
 webctl check 'role=checkbox name~="Remember"'
 webctl press Enter
 webctl scroll down
-webctl upload 'role=button name~="Upload"' --file ./doc.pdf
 ```
 
 ### Wait Conditions
@@ -156,57 +165,16 @@ webctl upload 'role=button name~="Upload"' --file ./doc.pdf
 ```bash
 webctl wait network-idle
 webctl wait 'exists:role=button name~="Continue"'
-webctl wait 'visible:role=dialog'
-webctl wait 'hidden:role=progressbar'
 webctl wait 'url-contains:"/dashboard"'
 ```
 
-### Session Management
+### Session & Console
 
 ```bash
-webctl status                   # Current state (includes console error counts)
+webctl status                   # Current state & error counts
 webctl save                     # Persist cookies now
-webctl sessions                 # List profiles
-webctl pages                    # List tabs
-webctl focus p2                 # Switch tab
-webctl close-page p1            # Close tab
-```
-
-### Console Logs
-
-```bash
-webctl console                  # Get last 100 logs
 webctl console --count          # Just counts by level (LLM-friendly)
 webctl console --level error    # Filter to errors only
-webctl console --follow         # Stream new logs continuously
-webctl console -n 50 -l warn    # Last 50 warnings
-```
-
-### Setup & Config
-
-```bash
-webctl setup                    # Install browser
-webctl doctor                   # Diagnose installation
-webctl init                     # Add to agent configs (CLAUDE.md, etc.)
-webctl config show              # Show settings
-webctl config set idle_timeout 1800
-```
-
----
-
-## Agent Integration
-
-Tell your AI agent to use webctl. The easiest way:
-
-```bash
-webctl init                     # Creates CLAUDE.md, GEMINI.md, etc.
-webctl init --agents claude     # Only specific agents
-```
-
-Or manually add to your agent's config:
-
-```
-For web browsing, use webctl CLI. Run `webctl agent-prompt` for instructions.
 ```
 
 ---
@@ -226,38 +194,22 @@ webctl start                              # Open browser
 webctl navigate "URL"                     # Go to URL
 webctl snapshot --interactive-only        # See clickable elements
 webctl click 'role=button name~="Text"'   # Click element
-webctl type 'role=textbox name~="Field"' "text"           # Type
 webctl type 'role=textbox name~="Field"' "text" --submit  # Type + Enter
-webctl select 'role=combobox' --label "Option"            # Dropdown
 webctl wait 'exists:role=button name~="..."'              # Wait for element
 webctl stop --daemon                      # Close browser
 ```
 
 **Query syntax:**
 
-- `role=button` - By ARIA role (button, link, textbox, combobox, checkbox)
-- `name~="partial"` - Partial match (preferred, more robust)
-- `name="exact"` - Exact match
-
-**Example - Login:**
-
-```bash
-webctl start
-webctl navigate "https://site.com/login"
-webctl type 'role=textbox name~="Email"' "user@example.com"
-webctl type 'role=textbox name~="Password"' "secret" --submit
-webctl wait 'url-contains:"/dashboard"'
-```
+* `role=button` - By ARIA role (button, link, textbox, combobox, checkbox)
+* `name~="partial"` - Partial match (preferred, more robust)
 
 **Tips:**
 
-- Use `--interactive-only` to reduce output (only buttons, links, inputs)
-- Use `name~=` for partial matching (handles minor text changes)
-- Use `webctl query "..."` if element not found - shows suggestions
-- Use `--quiet` to suppress event output
-- Sessions persist cookies - login once, stay logged in
-- Check `webctl status` for console error counts before investigating
-- Use `webctl console --count` for log summary, `--level error` for details
+* Use `--interactive-only` to reduce output (only buttons, links, inputs)
+* Use `name~=` for partial matching (handles minor text changes)
+* Use `webctl query "..."` if element not found - shows suggestions
+* Check `webctl status` for console error counts before investigating
 
 ---
 
@@ -273,10 +225,9 @@ webctl wait 'url-contains:"/dashboard"'
   Agent/User                      Chromium + Playwright
 ```
 
-- **CLI**: Stateless, sends commands to daemon
-- **Daemon**: Manages browser, auto-starts on first command
-- **Profiles**: `~/.local/share/webctl/profiles/`
-- **Config**: `~/.config/webctl/config.json`
+* **CLI**: Stateless, sends commands to daemon
+* **Daemon**: Manages browser, auto-starts on first command
+* **Profiles**: `~/.local/share/webctl/profiles/`
 
 ---
 
