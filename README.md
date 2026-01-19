@@ -68,14 +68,14 @@ This creates:
 
 **Supported agents:**
 
-| Agent | Format | Location (project) | Location (global) |
-|-------|--------|-------------------|-------------------|
-| `claude` | Skill | `.claude/skills/webctl/SKILL.md` | `~/.claude/skills/webctl/SKILL.md` |
-| `goose` | Skill | `.agents/skills/webctl/SKILL.md` | `~/.config/agents/skills/webctl/SKILL.md` |
-| `gemini` | Prompt | `GEMINI.md` | `~/.gemini/GEMINI.md` |
-| `copilot` | Prompt | `.github/copilot-instructions.md` | - |
-| `codex` | Prompt | `AGENTS.md` | `~/.codex/AGENTS.md` |
-| `claude-noskill` | Prompt | `CLAUDE.md` (legacy) | `~/.claude/CLAUDE.md` |
+| Agent            | Format | Location (project)                | Location (global)                         |
+|------------------|--------|-----------------------------------|-------------------------------------------|
+| `claude`         | Skill  | `.claude/skills/webctl/SKILL.md`  | `~/.claude/skills/webctl/SKILL.md`        |
+| `goose`          | Skill  | `.agents/skills/webctl/SKILL.md`  | `~/.config/agents/skills/webctl/SKILL.md` |
+| `gemini`         | Prompt | `GEMINI.md`                       | `~/.gemini/GEMINI.md`                     |
+| `copilot`        | Prompt | `.github/copilot-instructions.md` | -                                         |
+| `codex`          | Prompt | `AGENTS.md`                       | `~/.codex/AGENTS.md`                      |
+| `claude-noskill` | Prompt | `CLAUDE.md` (legacy)              | `~/.claude/CLAUDE.md`                     |
 
 **Why skills?** Skills are loaded on-demand - your agent only reads webctl instructions when actually doing web automation. This keeps your context clean for other tasks.
 
