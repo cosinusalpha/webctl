@@ -6,7 +6,7 @@
 # 1. Install
 pip install webctl
 
-# 2. Auto-configure your agent (Creates CLAUDE.md, GEMINI.md system prompts)
+# 2. Auto-configure your agent (creates skills/prompts for all supported agents)
 webctl init
 
 # 3. Start browsing
@@ -15,7 +15,7 @@ webctl navigate "https://google.com"
 webctl snapshot --interactive-only
 ```
 
-**`webctl init` automatically generates the system prompts your agent needs to drive the browser.**
+**`webctl init` automatically generates the skills and prompts your agents need to drive the browser.**
 
 ## Why CLI Instead of MCP?
 
@@ -54,15 +54,41 @@ pip install webctl
 webctl setup  # Downloads Chromium
 ```
 
-**Step 2: Generate Prompts**
-Run the init command to create the instruction files (CLAUDE.md, etc) for your agent:
+**Step 2: Generate Skills/Prompts**
 
 ```bash
-webctl init
+webctl init              # Project-level (recommended)
+webctl init --global     # Global (works across all projects)
 ```
 
-**Step 3: Add to Config**
-If you aren't using an auto-detecting agent, simply add this to your system prompt:
+This creates:
+
+- **Skills** for Claude Code and Goose (loaded on-demand when doing web tasks)
+- **Lean prompts** for Gemini, Copilot, and Codex (always in context)
+
+**Supported agents:**
+
+| Agent | Format | Location (project) | Location (global) |
+|-------|--------|-------------------|-------------------|
+| `claude` | Skill | `.claude/skills/webctl/SKILL.md` | `~/.claude/skills/webctl/SKILL.md` |
+| `goose` | Skill | `.agents/skills/webctl/SKILL.md` | `~/.config/agents/skills/webctl/SKILL.md` |
+| `gemini` | Prompt | `GEMINI.md` | `~/.gemini/GEMINI.md` |
+| `copilot` | Prompt | `.github/copilot-instructions.md` | - |
+| `codex` | Prompt | `AGENTS.md` | `~/.codex/AGENTS.md` |
+| `claude-noskill` | Prompt | `CLAUDE.md` (legacy) | `~/.claude/CLAUDE.md` |
+
+**Why skills?** Skills are loaded on-demand - your agent only reads webctl instructions when actually doing web automation. This keeps your context clean for other tasks.
+
+**Select specific agents:**
+
+```bash
+webctl init --agents claude,gemini    # Only Claude and Gemini
+webctl init --agents claude-noskill   # Legacy CLAUDE.md format
+```
+
+**Step 3: Add to Config (optional)**
+
+If your agent doesn't auto-detect the generated files, add this to your system prompt:
 
 > For web browsing, use webctl CLI. Run `webctl agent-prompt` for instructions.
 
@@ -201,15 +227,15 @@ webctl stop --daemon                      # Close browser
 
 **Query syntax:**
 
-* `role=button` - By ARIA role (button, link, textbox, combobox, checkbox)
-* `name~="partial"` - Partial match (preferred, more robust)
+- `role=button` - By ARIA role (button, link, textbox, combobox, checkbox)
+- `name~="partial"` - Partial match (preferred, more robust)
 
 **Tips:**
 
-* Use `--interactive-only` to reduce output (only buttons, links, inputs)
-* Use `name~=` for partial matching (handles minor text changes)
-* Use `webctl query "..."` if element not found - shows suggestions
-* Check `webctl status` for console error counts before investigating
+- Use `--interactive-only` to reduce output (only buttons, links, inputs)
+- Use `name~=` for partial matching (handles minor text changes)
+- Use `webctl query "..."` if element not found - shows suggestions
+- Check `webctl status` for console error counts before investigating
 
 ---
 
@@ -225,9 +251,9 @@ webctl stop --daemon                      # Close browser
   Agent/User                      Chromium + Playwright
 ```
 
-* **CLI**: Stateless, sends commands to daemon
-* **Daemon**: Manages browser, auto-starts on first command
-* **Profiles**: `~/.local/share/webctl/profiles/`
+- **CLI**: Stateless, sends commands to daemon
+- **Daemon**: Manages browser, auto-starts on first command
+- **Profiles**: `~/.local/share/webctl/profiles/`
 
 ---
 

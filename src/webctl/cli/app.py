@@ -351,39 +351,561 @@ def cmd_doctor() -> None:
         print_success("All checks passed! webctl is ready to use.")
 
 
-AGENT_PROMPT = """# webctl - Browser Control Tool
+# Lean prompt for non-skill agents (Gemini, Copilot, Codex, claude-noskill)
+# These are always in context, so they must be ~25 lines
+AGENT_PROMPT = """# webctl - Browser Control
 
-Control a browser via CLI. Start with `webctl start`, end with `webctl stop --daemon`.
+Start: `webctl start` | End: `webctl stop --daemon`
 
-## Commands
-- `webctl start` - Open browser
-- `webctl navigate "URL"` - Go to URL
-- `webctl snapshot --interactive-only` - See clickable elements (buttons, links, inputs)
-- `webctl click 'role=button name~="Text"'` - Click element
-- `webctl type 'role=textbox name~="Field"' "text"` - Type into field
-- `webctl type '...' "text" --submit` - Type and press Enter
-- `webctl select 'role=combobox name~="..."' --label "Option"` - Select dropdown
+## Quick Reference
+- `webctl snapshot --interactive-only` - See clickable elements
+- `webctl click 'role=button name~="Text"'` - Click
+- `webctl type 'role=textbox name~="Field"' "value"` - Type
+- `webctl type '...' "value" --submit` - Type + Enter
+- `webctl select 'role=combobox name~="..."' --label "Option"` - Dropdown
+- `webctl wait network-idle` - Wait for page load
 - `webctl wait 'exists:role=button name~="..."'` - Wait for element
-- `webctl stop --daemon` - Close browser
 
 ## Query Syntax
-- `role=button` - By ARIA role (button, link, textbox, combobox, checkbox)
-- `name~="partial"` - Partial name match (preferred)
-- `name="exact"` - Exact name match
+Quote: `'role=button name~="Text"'` (single outside, double for name)
+- `name~="text"` - Contains (PREFERRED - more robust)
+- `name="text"` - Exact match (brittle)
 
-## Example: Login
+## Reduce Output
+- `--interactive-only` - Only buttons/links/inputs (always use this)
+- `--within "role=main"` - Scope to area (skip nav/footer)
+
+## If Element Not Found
+`webctl query 'your-query'` - Debug what's available
+`webctl snapshot --interactive-only` - See all elements
+
+Run `webctl --help` for more.
+"""
+
+# Full skill content for skill-based agents (Claude, Goose)
+# These are loaded on-demand when agent needs browser automation
+SKILL_CONTENT = """---
+name: webctl
+description: Browser automation via CLI. Use when browsing websites, filling forms, extracting data from web pages, taking screenshots, or automating web interactions. Preferred over MCP browser tools for better context control.
+allowed-tools: Bash, Read
+---
+
+# webctl - Browser Automation CLI
+
+CLI tool for browser automation. Use this instead of MCP browser tools - it gives you control over what enters your context.
+
+## RULES (Read First!)
+
+1. **ALWAYS start a session:** `webctl start`
+2. **ALWAYS end your session:** `webctl stop --daemon`
+3. **ALWAYS snapshot before interacting** to see what elements exist
+4. **ALWAYS use `--interactive-only`** with snapshot (unless you need to read page text)
+5. **ALWAYS use `name~="text"`** not `name="text"` (see "Why name~=" below)
+6. **ALWAYS quote queries:** `'role=button name~="Submit"'`
+
+## Quick Start Template
+
+```bash
+# 1. Start browser
+webctl start                              # Visible browser
+# OR: webctl start --mode unattended      # Headless (no window)
+
+# 2. Go to page
+webctl navigate "https://example.com"
+
+# 3. See what's on the page (DO THIS BEFORE CLICKING ANYTHING)
+webctl snapshot --interactive-only
+
+# 4. Interact with elements
+webctl click 'role=button name~="Submit"'
+
+# 5. End session
+webctl stop --daemon
 ```
-webctl start
-webctl navigate "https://site.com/login"
+
+---
+
+## How Queries Work
+
+Queries find elements on the page using two parts:
+
+```
+role=ROLE name~="TEXT"
+```
+
+- **`role=X`** - Matches elements with ARIA role X (button, link, textbox, etc.)
+- **`name~="Y"`** - Matches elements whose visible label CONTAINS Y
+- **Both must match** - The element must have the right role AND contain the text
+
+**Quoting rules:**
+- Wrap the ENTIRE query in single quotes: `'...'`
+- Wrap the name value in double quotes: `name~="..."`
+- Full example: `'role=button name~="Submit"'`
+
+### Why `name~=` Instead of `name=`
+
+| Syntax | Behavior | Example |
+|--------|----------|---------|
+| `name~="Submit"` | Contains "Submit" | Matches "Submit", "Submit Form", "Submit Now" |
+| `name="Submit"` | Exactly "Submit" | ONLY matches "Submit", fails on "Submit Form" |
+
+**Use `name~=` because:**
+- Web pages change slightly over time
+- Button text might be "Submit" today, "Submit Form" tomorrow
+- `name=` will silently fail to find the element if text changes
+- `name~=` is more robust and forgiving
+
+### Common Roles Reference
+
+| Role | What It Matches | Example Query |
+|------|-----------------|---------------|
+| `button` | Buttons, submit buttons | `'role=button name~="Submit"'` |
+| `link` | Links, anchor tags | `'role=link name~="Sign in"'` |
+| `textbox` | Text inputs, text areas | `'role=textbox name~="Email"'` |
+| `combobox` | Dropdowns, select menus | `'role=combobox name~="Country"'` |
+| `checkbox` | Checkboxes | `'role=checkbox name~="Remember"'` |
+| `radio` | Radio buttons | `'role=radio name~="Option A"'` |
+| `form` | Forms (for scoping) | `--within "role=form"` |
+| `main` | Main content area | `--within "role=main"` |
+| `table` | Tables | `--within "role=table"` |
+| `navigation` | Nav menus | `--within "role=navigation"` |
+
+---
+
+## Session Lifecycle
+
+### Starting a Session
+
+```bash
+webctl start                      # Visible browser (see what's happening)
+webctl start --mode unattended    # Headless (no window, faster)
+webctl -s myprofile start         # Named session (separate cookies/login state)
+```
+
+**What happens:**
+- Browser launches (or connects to existing daemon)
+- Session is ready for commands
+- Default timeout for commands: 30 seconds
+
+### Ending a Session
+
+```bash
+webctl stop --daemon              # Closes browser AND daemon
+webctl stop                       # Just closes browser, daemon stays running
+```
+
+**IMPORTANT: Always end with `webctl stop --daemon`**
+
+### What If I Forget to Stop?
+
+- Browser stays open consuming memory
+- Session remains active
+- You can still run `webctl stop --daemon` later to clean up
+- Starting a new `webctl start` will reuse the existing session
+
+### What If I Start Twice?
+
+- It reuses the existing session (safe to do)
+- No error, no duplicate browsers
+
+### What If a Command Fails Mid-Session?
+
+- Session stays active
+- Browser stays on current page
+- You can retry the command or continue with other commands
+- Use `webctl status` to check session state
+
+---
+
+## Snapshot Commands
+
+### Use `--interactive-only` (Default Choice)
+
+```bash
+webctl snapshot --interactive-only
+```
+
+Shows only elements you can interact with: buttons, links, inputs, checkboxes, etc.
+
+**Use this when:** You want to click, type, or interact with the page.
+
+### Use Full Snapshot (Without `--interactive-only`)
+
+```bash
+webctl snapshot
+```
+
+Shows ALL elements including text, headings, paragraphs.
+
+**Use this when:** You need to read text content on the page.
+
+### Use `--within` to Scope (Reduce Noise)
+
+```bash
+webctl snapshot --interactive-only --within "role=main"
+webctl snapshot --interactive-only --within "role=form"
+```
+
+**What `--within` does:**
+- Filters output to only show elements INSIDE the specified container
+- Reduces noise from navigation, footers, sidebars
+- Use it when page has too many elements
+
+**Common scopes:**
+- `--within "role=main"` - Main content, skip nav/footer
+- `--within "role=form"` - Just the form
+- `--within "role=table"` - Just a table
+- `--within "role=dialog"` - Just a modal/popup
+
+### Limit Output Size
+
+```bash
+webctl snapshot --interactive-only --limit 30
+```
+
+Caps output at 30 elements. Use when pages have many elements.
+
+---
+
+## Interaction Commands
+
+### Click
+
+```bash
+webctl click 'role=button name~="Submit"'
+webctl click 'role=link name~="Sign in"'
+webctl click 'role=button name~="Next"'
+```
+
+### Type Text
+
+```bash
+# Type into a field
 webctl type 'role=textbox name~="Email"' "user@example.com"
-webctl type 'role=textbox name~="Password"' "pass" --submit
+
+# Type and press Enter (for search, login forms)
+webctl type 'role=textbox name~="Search"' "my query" --submit
+```
+
+### Select from Dropdown
+
+```bash
+# By visible text (PREFERRED)
+webctl select 'role=combobox name~="Country"' --label "Germany"
+
+# By value attribute
+webctl select 'role=combobox name~="Country"' --value "DE"
+```
+
+### Checkboxes
+
+```bash
+webctl check 'role=checkbox name~="Remember"'
+webctl uncheck 'role=checkbox name~="Newsletter"'
+```
+
+### Keyboard
+
+```bash
+webctl press Enter
+webctl press Tab
+webctl press Escape
+```
+
+### Scroll
+
+```bash
+webctl scroll down
+webctl scroll up
+webctl scroll --to "role=list" down   # Scroll element into view
+```
+
+### File Upload
+
+```bash
+webctl upload 'role=button name~="Upload"' --file /path/to/file.pdf
+```
+
+---
+
+## Wait Commands
+
+**Default timeout: 30 seconds / 30000ms** (override with `--timeout`, value in milliseconds)
+
+### Wait for Page Load
+
+```bash
+webctl wait network-idle              # Wait for all network requests to finish
+```
+
+**Use after:** `navigate`, clicking links that load new pages
+
+### Wait for Element to Appear
+
+```bash
+webctl wait 'exists:role=button name~="Continue"'
+```
+
+**What happens:** Retries query every ~100ms until element appears or timeout.
+
+**Use when:** Element loads dynamically after page load.
+
+### Wait for Element to Disappear
+
+```bash
+webctl wait 'hidden:role=dialog'
+webctl wait 'hidden:role=progressbar'
+```
+
+**Use when:** Waiting for loading spinners or modals to close.
+
+### Wait for URL Change
+
+```bash
 webctl wait 'url-contains:"/dashboard"'
 ```
 
-## Tips
-- Use `webctl snapshot --interactive-only` to see available elements
-- Use `name~=` for partial matching (more robust)
-- Use `webctl query "..."` to debug if elements not found
+**Use after:** Form submission, login, actions that redirect.
+
+### Custom Timeout
+
+```bash
+webctl wait --timeout 60000 network-idle    # 60 seconds
+webctl wait --timeout 5000 'exists:role=button name~="Load"'  # 5 seconds
+```
+
+---
+
+## Navigation Commands
+
+```bash
+webctl navigate "https://example.com"
+webctl back
+webctl forward
+webctl reload
+```
+
+**Note:** `navigate` waits for initial page load but NOT for all dynamic content. Add `webctl wait network-idle` if page loads data dynamically.
+
+---
+
+## When Queries Fail - Troubleshooting
+
+### Step 1: Check What's Actually on the Page
+
+```bash
+webctl snapshot --interactive-only
+```
+
+Look at the output. Is your element there with a different name?
+
+### Step 2: Test Your Query
+
+```bash
+webctl query 'role=button name~="Submit"'
+```
+
+**What this shows:**
+- Matching elements (if any)
+- Suggestions for similar elements if no exact match
+- Helps you see what your query matches vs what's available
+
+### Step 3: Common Fixes
+
+| Problem | Solution |
+|---------|----------|
+| "Element not found" | Check snapshot, adjust query text |
+| Element exists but wrong name | Use `name~=` with different text |
+| Too many matches | Add more specific text to name |
+| Element in popup/modal | Check if modal is open, might need `--within "role=dialog"` |
+| Element appeared after page load | Add `webctl wait 'exists:...'` before interacting |
+
+### Step 4: If Still Stuck
+
+```bash
+# See ALL elements (not just interactive)
+webctl snapshot
+
+# Check for JavaScript errors
+webctl console --level error
+
+# Take screenshot to see visual state
+webctl screenshot --path debug.png
+```
+
+### Step 5: Click Worked but Nothing Happened
+
+Sometimes the click succeeds but the page doesn't respond as expected:
+
+```bash
+# Wait for page to respond after clicking
+webctl click 'role=button name~="Submit"'
+webctl wait network-idle                    # Wait for any network activity
+webctl screenshot --path after-click.png    # See what happened visually
+
+# Or wait for expected result
+webctl click 'role=button name~="Submit"'
+webctl wait 'url-contains:"/success"'       # Wait for redirect
+```
+
+**Common causes:**
+- Page needs time to process (add `wait network-idle`)
+- Button triggers JavaScript, not navigation (check for new elements)
+- Form validation failed (check for error messages in snapshot)
+
+---
+
+## Error Messages and What They Mean
+
+| Error | Meaning | Fix |
+|-------|---------|-----|
+| "Element not found" | Query matched nothing | Check snapshot, adjust query |
+| "Element not visible" | Element exists but hidden | Wait for animation/modal, or scroll |
+| "Element disabled" | Button/input is disabled | Wait for page to enable it, or check if action is allowed |
+| "Timeout" | Action took too long | Increase `--timeout` or add explicit `wait` |
+| "Session not found" | No active session | Run `webctl start` first |
+| "Navigation failed" | URL couldn't load | Check URL, network, or site might be down |
+
+---
+
+## Output Control
+
+```bash
+webctl --quiet navigate "URL"          # Suppress status messages
+webctl --result-only snapshot          # Just the data, no metadata
+webctl --format jsonl snapshot         # JSON lines (for piping to jq)
+```
+
+**When to use:**
+- `--quiet` - When you don't need status updates
+- `--result-only` - When parsing output programmatically
+- `--format jsonl` - When piping to `jq` or other JSON tools
+
+---
+
+## Multi-Tab Support
+
+```bash
+webctl pages              # List all open tabs
+webctl focus 1            # Switch to tab 1
+webctl close-page 2       # Close tab 2
+```
+
+**When to use:** When a click opens a new tab, or site has multiple windows.
+
+---
+
+## Human-In-The-Loop (HITL)
+
+**Use when automation can't proceed alone:** CAPTCHA, MFA, complex auth.
+
+**Requires visible browser:** Use `webctl start` (NOT `--mode unattended`)
+
+### Pause for Secret Entry (MFA codes, passwords)
+
+```bash
+webctl prompt-secret --prompt "Enter MFA code:"
+```
+
+Pauses until human enters a value.
+
+### Pause for Human Action (CAPTCHA, manual steps)
+
+Use shell read command to pause:
+
+```bash
+read -p "Please solve the CAPTCHA, then press Enter"
+```
+
+Pauses until human presses Enter in terminal.
+
+### Example: Login with MFA
+
+```bash
+webctl start                    # Must be visible
+webctl navigate "https://example.com/login"
+webctl type 'role=textbox name~="Email"' "user@example.com"
+webctl type 'role=textbox name~="Password"' "password" --submit
+webctl prompt-secret --prompt "Enter MFA code from authenticator:"
+webctl wait 'url-contains:"/dashboard"'
+webctl stop --daemon
+```
+
+---
+
+## Common Patterns
+
+### Login Flow
+
+```bash
+webctl start
+webctl navigate "https://example.com/login"
+webctl snapshot --interactive-only --within "role=form"
+webctl type 'role=textbox name~="Email"' "user@example.com"
+webctl type 'role=textbox name~="Password"' "password" --submit
+webctl wait 'url-contains:"/dashboard"'
+webctl snapshot --interactive-only
+webctl stop --daemon
+```
+
+### Form Submission
+
+```bash
+webctl start
+webctl navigate "https://example.com/form"
+webctl snapshot --interactive-only --within "role=form"
+webctl type 'role=textbox name~="Name"' "John Doe"
+webctl type 'role=textbox name~="Email"' "john@example.com"
+webctl select 'role=combobox name~="Country"' --label "Germany"
+webctl check 'role=checkbox name~="Terms"'
+webctl click 'role=button name~="Submit"'
+webctl wait network-idle
+webctl stop --daemon
+```
+
+### Search and Read Results
+
+```bash
+webctl start
+webctl navigate "https://example.com"
+webctl type 'role=textbox name~="Search"' "my search query" --submit
+webctl wait network-idle
+webctl snapshot --within "role=main"    # Full snapshot to read text
+webctl stop --daemon
+```
+
+---
+
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Start browser | `webctl start` |
+| Start headless | `webctl start --mode unattended` |
+| Go to URL | `webctl navigate "URL"` |
+| See elements | `webctl snapshot --interactive-only` |
+| Click button | `webctl click 'role=button name~="Text"'` |
+| Type in field | `webctl type 'role=textbox name~="Field"' "value"` |
+| Type + Enter | `webctl type 'role=textbox name~="Field"' "value" --submit` |
+| Select dropdown | `webctl select 'role=combobox name~="Field"' --label "Option"` |
+| Check checkbox | `webctl check 'role=checkbox name~="Field"'` |
+| Wait for load | `webctl wait network-idle` |
+| Wait for element | `webctl wait 'exists:role=button name~="Text"'` |
+| Debug query | `webctl query 'role=button name~="Text"'` |
+| End session | `webctl stop --daemon` |
+
+---
+
+## Remember
+
+1. **Start:** `webctl start`
+2. **Snapshot first:** `webctl snapshot --interactive-only`
+3. **Quote queries:** `'role=button name~="Text"'`
+4. **Use `name~=`** not `name=`
+5. **Debug with:** `webctl query` and `webctl snapshot`
+6. **End:** `webctl stop --daemon`
+
+Run `webctl --help` or `webctl <command> --help` for more options.
 """
 
 
@@ -434,25 +956,46 @@ def cmd_agent_prompt(
 AGENT_CONFIGS = {
     "claude": {
         "name": "Claude Code",
-        "file": "CLAUDE.md",
-        "description": "Claude Code / Anthropic CLI",
+        "skill": True,
+        "file": Path(".claude") / "skills" / "webctl" / "SKILL.md",
+        "global_file": Path.home() / ".claude" / "skills" / "webctl" / "SKILL.md",
+        "description": "Claude Code skill",
+    },
+    "claude-noskill": {
+        "name": "Claude Code (legacy)",
+        "file": Path("CLAUDE.md"),
+        "global_file": Path.home() / ".claude" / "CLAUDE.md",
+        "description": "Claude Code project-local instructions",
+    },
+    "goose": {
+        "name": "Goose",
+        "skill": True,
+        "file": Path(".agents") / "skills" / "webctl" / "SKILL.md",
+        "global_file": Path.home() / ".config" / "agents" / "skills" / "webctl" / "SKILL.md",
+        "description": "Goose skill (portable format)",
     },
     "gemini": {
         "name": "Gemini CLI",
-        "file": "GEMINI.md",
+        "file": Path("GEMINI.md"),
+        "global_file": Path.home() / ".gemini" / "GEMINI.md",
         "description": "Google Gemini CLI",
     },
     "copilot": {
         "name": "GitHub Copilot",
-        "file": ".github/copilot-instructions.md",
-        "description": "GitHub Copilot in VS Code",
+        "file": Path(".github") / "copilot-instructions.md",
+        # No global_file - Copilot has fragmented global support
+        "description": "GitHub Copilot",
     },
     "codex": {
         "name": "Codex CLI",
-        "file": "AGENTS.md",
+        "file": Path("AGENTS.md"),
+        "global_file": Path.home() / ".codex" / "AGENTS.md",
         "description": "OpenAI Codex CLI",
     },
 }
+
+# Default agents (claude-noskill excluded from default)
+DEFAULT_AGENTS = ["claude", "goose", "gemini", "copilot", "codex"]
 
 
 def _file_contains_webctl(filepath: Path) -> bool:
@@ -466,39 +1009,51 @@ def _file_contains_webctl(filepath: Path) -> bool:
         return False
 
 
-def _append_to_agent_config(filepath: Path, force: bool = False) -> tuple[bool, str]:
-    """Append webctl instructions to an agent config file.
+def _write_agent_config(
+    filepath: Path, content: str, is_skill: bool, force: bool = False
+) -> tuple[bool, str]:
+    """Write webctl instructions to an agent config file.
+
+    For skill files: Creates a new file with skill content (skills are standalone).
+    For non-skill files: Appends to existing content or creates new file.
 
     Returns (success, message).
     """
     # Check if already has webctl instructions
     if not force and _file_contains_webctl(filepath):
-        return False, "already contains webctl instructions (use --force to append anyway)"
+        return False, "already contains webctl instructions (use --force to overwrite)"
 
     # Ensure parent directory exists
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
-    # Prepare content to append
-    separator = "\n\n---\n\n" if filepath.exists() else ""
-    existing_content = ""
-
-    if filepath.exists():
+    if is_skill:
+        # Skills are standalone files - always write fresh
         try:
-            existing_content = filepath.read_text(encoding="utf-8")
+            filepath.write_text(content, encoding="utf-8")
+            return True, "created"
         except Exception as e:
-            return False, f"could not read existing file: {e}"
+            return False, f"could not write file: {e}"
+    else:
+        # Non-skill files: append to existing content
+        separator = "\n\n---\n\n" if filepath.exists() else ""
+        existing_content = ""
 
-    # Combine content
-    new_content = existing_content + separator + AGENT_PROMPT
+        if filepath.exists():
+            try:
+                existing_content = filepath.read_text(encoding="utf-8")
+            except Exception as e:
+                return False, f"could not read existing file: {e}"
 
-    try:
-        filepath.write_text(new_content, encoding="utf-8")
-        if existing_content:
-            return True, "appended to existing file"
-        else:
-            return True, "created new file"
-    except Exception as e:
-        return False, f"could not write file: {e}"
+        new_content = existing_content + separator + content
+
+        try:
+            filepath.write_text(new_content, encoding="utf-8")
+            if existing_content:
+                return True, "appended"
+            else:
+                return True, "created"
+        except Exception as e:
+            return False, f"could not write file: {e}"
 
 
 @app.command("init")
@@ -507,10 +1062,10 @@ def cmd_init(
         None,
         "--agents",
         "-a",
-        help="Comma-separated list of agents: claude,gemini,copilot,codex (default: all)",
+        help="Comma-separated agents: claude,goose,gemini,copilot,codex,claude-noskill",
     ),
     force: bool = typer.Option(
-        False, "--force", "-f", help="Add even if webctl instructions already exist"
+        False, "--force", "-f", help="Overwrite even if webctl instructions already exist"
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", "-n", help="Show what would be done without making changes"
@@ -518,37 +1073,50 @@ def cmd_init(
     directory: str | None = typer.Option(
         None, "--dir", "-d", help="Target directory (default: current)"
     ),
+    use_global: bool = typer.Option(
+        False, "--global", "-g", help="Install to global config locations"
+    ),
 ) -> None:
     """Add webctl instructions to AI agent config files.
 
-    This command appends webctl usage instructions to the configuration files
-    used by various AI coding assistants. It will NOT overwrite existing content -
-    it safely appends to any existing configuration.
+    Creates skill files for Claude Code and Goose (on-demand activation),
+    and appends lean instructions to other agents' config files.
 
     Supported agents:
-      claude   - CLAUDE.md (Claude Code / Anthropic CLI)
-      gemini   - GEMINI.md (Google Gemini CLI)
-      copilot  - .github/copilot-instructions.md (GitHub Copilot)
-      codex    - AGENTS.md (OpenAI Codex CLI)
+      claude        - .claude/skills/webctl/SKILL.md (Claude Code skill)
+      goose         - .agents/skills/webctl/SKILL.md (Goose skill)
+      gemini        - GEMINI.md (Google Gemini CLI)
+      copilot       - .github/copilot-instructions.md (GitHub Copilot)
+      codex         - AGENTS.md (OpenAI Codex CLI)
+      claude-noskill - CLAUDE.md (Claude Code legacy, always in context)
 
     Examples:
-        webctl init                       # Add to all agent configs
-        webctl init --agents claude       # Only Claude Code
-        webctl init --agents claude,gemini  # Claude and Gemini
-        webctl init --dry-run             # Preview changes
+        webctl init                         # Add to all default agents (project)
+        webctl init --global                # Install globally
+        webctl init --agents claude         # Only Claude Code skill
+        webctl init --agents claude-noskill # Legacy CLAUDE.md format
+        webctl init --agents claude,gemini  # Claude skill and Gemini
+        webctl init --dry-run               # Preview changes
         webctl init --dir /path/to/project  # Specific project
     """
-    console.print("[bold]webctl init[/bold] - Adding webctl instructions to agent configs")
+    mode = "global" if use_global else "project"
+    console.print(f"[bold]webctl init[/bold] - Adding webctl instructions ({mode})")
     console.print()
 
-    # Determine target directory
+    # Validate --global and --dir are not both specified
+    if use_global and directory:
+        print_error("Cannot use --global and --dir together")
+        raise typer.Exit(1)
+
+    # Determine target directory for project-level installs
     target_dir = Path(directory) if directory else Path.cwd()
-    if not target_dir.is_dir():
+    if not use_global and not target_dir.is_dir():
         print_error(f"Directory not found: {target_dir}")
         raise typer.Exit(1)
 
-    console.print(f"Target directory: [cyan]{target_dir}[/cyan]")
-    console.print()
+    if not use_global:
+        console.print(f"Target directory: [cyan]{target_dir}[/cyan]")
+        console.print()
 
     # Parse agent selection
     if agents:
@@ -559,29 +1127,66 @@ def cmd_init(
             console.print(f"Valid agents: {', '.join(AGENT_CONFIGS.keys())}")
             raise typer.Exit(1)
     else:
-        selected = list(AGENT_CONFIGS.keys())
+        selected = DEFAULT_AGENTS
 
     # Process each agent
     results = []
     for agent_key in selected:
         config = AGENT_CONFIGS[agent_key]
-        filepath = target_dir / config["file"]
+        is_skill = bool(config.get("skill", False))
+        file_path = config["file"]
+        assert isinstance(file_path, Path)
+
+        # Determine file path
+        if use_global:
+            if "global_file" not in config:
+                # Agent doesn't support global config
+                if not dry_run:
+                    console.print(
+                        f"  [yellow]⚠[/yellow] {config['name']:20} skipped (no global config support)"
+                    )
+                    results.append((agent_key, False))
+                else:
+                    console.print(
+                        f"  {config['name']:20} [yellow]skip[/yellow] (no global config support)"
+                    )
+                continue
+            filepath = config["global_file"]
+            assert isinstance(filepath, Path)
+        else:
+            filepath = target_dir / file_path
+
+        # Determine content to write
+        content = SKILL_CONTENT if is_skill else AGENT_PROMPT
 
         exists = filepath.exists()
         has_webctl = _file_contains_webctl(filepath)
 
+        # Format path for display
+        display_path = str(filepath)
+        if use_global:
+            # Show ~ for home directory
+            try:
+                display_path = "~/" + str(filepath.relative_to(Path.home()))
+            except ValueError:
+                pass
+
         if dry_run:
             if has_webctl and not force:
                 status = "[yellow]skip[/yellow] (already has webctl)"
+            elif is_skill:
+                status = "[green]create[/green]" if not exists else "[green]overwrite[/green]"
             elif exists:
                 status = "[green]append[/green]"
             else:
                 status = "[green]create[/green]"
-            console.print(f"  {config['name']:20} {config['file']:35} {status}")
+            console.print(f"  {config['name']:25} {display_path}")
+            console.print(f"    {status}")
         else:
-            success, message = _append_to_agent_config(filepath, force)
+            success, message = _write_agent_config(filepath, content, is_skill, force)
             if success:
                 console.print(f"  [green]✓[/green] {config['name']:20} {message}")
+                console.print(f"    [dim]{display_path}[/dim]")
                 results.append((agent_key, True))
             else:
                 console.print(f"  [yellow]![/yellow] {config['name']:20} {message}")
