@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0] - 2026-01-23
+
+### Added
+
+- Peer credential checks for Unix domain sockets on Linux and macOS, with tests to guard handshake integrity.
+- CLI output refinements that trim noisy context and add accessibility-friendly formatting for terminal usage.
+
+### Changed
+
+- Transport now uses Unix domain sockets exclusively; deprecated TCP/named pipe paths were removed and connection error handling tightened.
+- UDS server/client paths now run non-blocking to reduce stalls and improve IPC robustness.
+- Windows socket handling cleaned up with clearer structure and better error management.
+- Broad code cleanup removing unused dependencies, dead helpers, and stray comments for a leaner codebase.
+
 ## [0.2.0] - 2026-01-19
 
 ### Added
