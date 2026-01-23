@@ -35,7 +35,7 @@ if sys.platform == "win32":
     # Monkey-patch the missing constant
     socket.AF_UNIX = 1  # type: ignore[attr-defined]
 
-    class _sockaddr_un(ctypes.Structure):
+    class _sockaddr_un(ctypes.Structure):  # noqa: N801 - matches C struct name
         """Windows sockaddr_un structure."""
 
         _fields_ = [("sun_family", ctypes.c_ushort), ("sun_path", ctypes.c_char * 108)]
@@ -300,20 +300,22 @@ if sys.platform == "win32":
             self._socket: socket.socket | None = None
             self._client_handler = client_handler
             self._running = False
-            self._accept_task: asyncio.Task | None = None
+            self._accept_task: asyncio.Task[None] | None = None
 
         async def start(self) -> None:
             if self.socket_path.exists():
                 self.socket_path.unlink()
 
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
-                self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                _win_bind_unix(self._socket, str(self.socket_path))
-                self._socket.listen(5)
-                self._socket.setblocking(False)
+                _win_bind_unix(sock, str(self.socket_path))
+                sock.listen(5)
+                sock.setblocking(False)
             except OSError as e:
+                sock.close()
                 raise SocketError(self._format_error(e)) from e
 
+            self._socket = sock
             self._running = True
             self._accept_task = asyncio.create_task(self._accept_loop())
 
@@ -328,27 +330,18 @@ if sys.platform == "win32":
             )
 
         async def _accept_loop(self) -> None:
-            """Accept connections in a loop using ctypes accept."""
-            loop = asyncio.get_event_loop()
-
             while self._running and self._socket:
-                try:
-                    # Wait for socket to be readable
-                    await loop.sock_accept(self._socket)
-                except OSError:
-                    # sock_accept doesn't work for AF_UNIX on Windows
-                    # Fall back to polling with ctypes
-                    pass
-
-                # Use ctypes accept
                 try:
                     fd = _win_accept_unix(self._socket)
                     if fd is not None:
-                        conn_sock = socket.socket(fileno=fd)
+                        try:
+                            conn_sock = socket.socket(fileno=fd)
+                        except OSError:
+                            os.close(fd)
+                            raise
                         conn_sock.setblocking(False)
                         asyncio.create_task(self._handle_connection(conn_sock))
                     else:
-                        # No connection ready, wait a bit
                         await asyncio.sleep(0.01)
                 except OSError as e:
                     if self._running:
