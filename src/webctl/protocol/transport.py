@@ -6,6 +6,7 @@ Supports Linux, macOS, and Windows (build 17063+).
 
 import asyncio
 import os
+import socket
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
@@ -159,18 +160,18 @@ class UnixSocketServerTransport(TransportServer):
         self._client_handler = client_handler
 
     async def start(self) -> None:
-        # Remove stale socket
         if self.socket_path.exists():
             self.socket_path.unlink()
 
         try:
-            self._server = await asyncio.start_unix_server(
-                self._handle_client, path=str(self.socket_path)
-            )
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.setblocking(False)
+            sock.bind(str(self.socket_path))
+            sock.listen()
+            self._server = await asyncio.start_server(self._handle_client, sock=sock)
         except OSError as e:
             raise SocketError(self._format_error(e)) from e
 
-        # Set permissions (non-Windows only)
         if sys.platform != "win32":
             os.chmod(self.socket_path, 0o600)
 
@@ -222,9 +223,10 @@ class UnixSocketClientTransport(Transport):
 
     async def connect(self) -> None:
         try:
-            self._reader, self._writer = await asyncio.open_unix_connection(
-                path=str(self.socket_path)
-            )
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.setblocking(False)
+            await asyncio.get_event_loop().sock_connect(sock, str(self.socket_path))
+            self._reader, self._writer = await asyncio.open_connection(sock=sock)
         except OSError as e:
             raise SocketError(self._format_error(e)) from e
 
