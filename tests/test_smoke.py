@@ -270,3 +270,124 @@ class TestErrorHandling:
         # Should either succeed with no matches or fail with parse error
         # Both are acceptable
         assert result.returncode == 0 or "error" in (result.stdout + result.stderr).lower()
+
+
+class TestAIFeatures:
+    """Test AI-friendly features for context efficiency."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, browser_session):
+        """Ensure browser is on example.com."""
+        run_webctl("navigate", "https://example.com")
+
+    def test_snapshot_count(self):
+        """--count returns only stats, no elements."""
+        result = run_webctl("snapshot", "--count")
+        assert result.returncode == 0
+        # Should have element count stats
+        output = result.stdout.lower()
+        assert "element" in output or "total" in output
+        # Should NOT have individual element output (no n1, n2, etc.)
+        assert "n1" not in result.stdout
+
+    def test_snapshot_show_query(self):
+        """--show-query includes query string for each element."""
+        result = run_webctl("snapshot", "--show-query", "--limit", "5")
+        assert result.returncode == 0
+        # Should have query syntax like role=link name~="..."
+        assert "role=" in result.stdout
+
+    def test_snapshot_grep(self):
+        """--grep filters elements by pattern."""
+        result = run_webctl("snapshot", "--grep", "link")
+        assert result.returncode == 0
+        # Output should only contain link elements
+        output = result.stdout.lower()
+        assert "link" in output
+        # Should not have heading elements (example.com has heading)
+        lines = result.stdout.strip().split("\n")
+        element_lines = [l for l in lines if l.startswith("n")]
+        for line in element_lines:
+            assert "link" in line.lower()
+
+    def test_snapshot_names_only(self):
+        """--names-only outputs minimal info."""
+        result = run_webctl("snapshot", "--names-only", "--limit", "5")
+        assert result.returncode == 0
+        # Should still have output
+        assert len(result.stdout) > 0
+
+    def test_status_brief(self):
+        """--brief returns one-line status."""
+        result = run_webctl("status", "--brief")
+        assert result.returncode == 0
+        # Should be one line with URL
+        lines = [l for l in result.stdout.strip().split("\n") if l]
+        assert len(lines) == 1
+        assert "example.com" in lines[0]
+
+    def test_click_retry(self):
+        """--retry retries on success (doesn't need to fail)."""
+        result = run_webctl("click", "role=link", "--retry", "1")
+        assert result.returncode == 0
+        # Navigate back for next tests
+        run_webctl("navigate", "https://example.com")
+
+    def test_click_wait(self):
+        """--wait waits after click."""
+        result = run_webctl("click", "role=link", "--wait", "load")
+        assert result.returncode == 0
+        # Navigate back for next tests
+        run_webctl("navigate", "https://example.com")
+
+    def test_click_retry_and_wait(self):
+        """--retry and --wait work together."""
+        result = run_webctl("click", "role=link", "--retry", "1", "--wait", "load")
+        assert result.returncode == 0
+        # Navigate back for next tests
+        run_webctl("navigate", "https://example.com")
+
+    def test_compact_format_default(self):
+        """Default format is compact with summary header."""
+        result = run_webctl("snapshot", "--limit", "5")
+        assert result.returncode == 0
+        # Should have summary header with element count
+        assert "Snapshot:" in result.stdout or "element" in result.stdout.lower()
+
+    def test_force_flag(self):
+        """--force shows full output even if large."""
+        result = run_webctl("--force", "snapshot")
+        assert result.returncode == 0
+        # Should have output
+        assert len(result.stdout) > 0
+
+
+class TestFillForm:
+    """Test fill-form command (needs a page with form elements)."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, browser_session):
+        """Navigate to a test page with form elements."""
+        # example.com doesn't have forms, so we test error handling
+        run_webctl("navigate", "https://example.com")
+
+    def test_fill_form_help(self):
+        """fill-form help shows usage."""
+        result = run_webctl("fill-form", "--help")
+        assert result.returncode == 0
+        assert "fields" in result.stdout.lower() or "json" in result.stdout.lower()
+
+    def test_fill_form_no_fields(self):
+        """fill-form with empty fields returns error."""
+        result = run_webctl("fill-form", "{}", check=False)
+        # Empty fields should return an error
+        assert result.returncode != 0
+        output = result.stdout + result.stderr
+        assert "no fields" in output.lower() or "missing" in output.lower()
+
+    def test_fill_form_invalid_json(self):
+        """fill-form with invalid JSON fails gracefully."""
+        result = run_webctl("fill-form", "not json", check=False)
+        assert result.returncode != 0
+        output = result.stdout + result.stderr
+        assert "json" in output.lower() or "error" in output.lower()

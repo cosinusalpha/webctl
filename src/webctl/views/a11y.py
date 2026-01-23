@@ -36,6 +36,13 @@ class A11yExtractOptions:
     roles: str | None = None  # Comma-separated roles
     interactive_only: bool = False
     within: str | None = None  # Query to scope snapshot (e.g., "role=main")
+    # Large output handling
+    grep_pattern: str | None = None  # Regex pattern to filter by role+name
+    max_name_length: int | None = None  # Truncate names longer than this
+    visible_only: bool = False  # If True, filter to viewport (expensive - requires bbox lookup per element)
+    names_only: bool = False  # Only output role and name (no states/attributes)
+    show_query: bool = False  # Include the query string to target each element
+    count_only: bool = False  # Only return stats, no items
 
 
 def parse_aria_snapshot(snapshot: str) -> list[dict[str, Any]]:
@@ -241,6 +248,8 @@ async def extract_a11y_view(
         limit=options.limit,
         roles=parse_roles_string(options.roles) if options.roles else None,
         interactive_only=options.interactive_only,
+        grep_pattern=options.grep_pattern,
+        max_name_length=options.max_name_length,
     )
 
     # Build path hints
@@ -284,18 +293,56 @@ async def extract_a11y_view(
         # Remove internal depth field
         item.pop("_depth", None)
 
-        # Add bbox if requested (expensive)
-        if options.include_bbox:
+        # Apply visible_only filter (check if element is in viewport)
+        if options.visible_only:
+            bbox = await _get_element_bbox(page, item)
+            if bbox:
+                viewport = page.viewport_size
+                if viewport:
+                    # Check if element is outside viewport
+                    if (
+                        bbox["x"] + bbox["width"] < 0
+                        or bbox["y"] + bbox["height"] < 0
+                        or bbox["x"] > viewport["width"]
+                        or bbox["y"] > viewport["height"]
+                    ):
+                        continue  # Skip off-viewport elements
+                # Add bbox if requested
+                if options.include_bbox:
+                    item["bbox"] = bbox
+        elif options.include_bbox:
+            # Add bbox if requested (expensive)
             bbox = await _get_element_bbox(page, item)
             if bbox:
                 item["bbox"] = bbox
 
         # Build final item
-        result: dict[str, Any] = {
-            "type": "item",
-            "view": "a11y",
-            **item,
-        }
+        if options.names_only:
+            # Strip to just role and name for minimal output
+            result: dict[str, Any] = {
+                "type": "item",
+                "view": "a11y",
+                "id": item.get("id", ""),
+                "role": item.get("role", ""),
+                "name": item.get("name", ""),
+            }
+        else:
+            result = {
+                "type": "item",
+                "view": "a11y",
+                **item,
+            }
+
+        # Add query string if requested
+        if options.show_query:
+            role = item.get("role", "")
+            name = item.get("name", "")
+            if name:
+                # Escape quotes in name and use partial match
+                escaped_name = name.replace('"', '\\"')
+                result["query"] = f'role={role} name~="{escaped_name}"'
+            else:
+                result["query"] = f"role={role}"
 
         yield result
 

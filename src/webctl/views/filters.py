@@ -71,6 +71,8 @@ class SnapshotFilter:
     roles: set[str] | None = None
     interactive_only: bool = False
     include_landmarks: bool = True  # Include landmarks even with interactive_only
+    grep_pattern: str | None = None  # Regex pattern to filter by role+name
+    max_name_length: int | None = None  # Truncate names longer than this
 
     def is_active(self) -> bool:
         """Check if any filtering is configured."""
@@ -80,6 +82,8 @@ class SnapshotFilter:
                 self.limit is not None,
                 self.roles is not None,
                 self.interactive_only,
+                self.grep_pattern is not None,
+                self.max_name_length is not None,
             ]
         )
 
@@ -110,6 +114,17 @@ def filter_a11y_items(
     Yields:
         Filtered items
     """
+    import re
+
+    # Compile grep pattern if provided
+    grep_regex = None
+    if filter_config.grep_pattern:
+        try:
+            grep_regex = re.compile(filter_config.grep_pattern, re.IGNORECASE)
+        except re.error:
+            # Invalid regex, treat as literal string
+            grep_regex = re.compile(re.escape(filter_config.grep_pattern), re.IGNORECASE)
+
     if not filter_config.is_active():
         yield from items
         return
@@ -130,6 +145,19 @@ def filter_a11y_items(
         role = item.get("role", "")
         if not filter_config.should_include_role(role):
             continue
+
+        # Apply grep filter
+        if grep_regex:
+            name = item.get("name", "")
+            searchable = f"{role} {name}"
+            if not grep_regex.search(searchable):
+                continue
+
+        # Apply name truncation
+        if filter_config.max_name_length:
+            name = item.get("name", "")
+            if name and len(name) > filter_config.max_name_length:
+                item["name"] = name[: filter_config.max_name_length - 3] + "..."
 
         count += 1
         yield item

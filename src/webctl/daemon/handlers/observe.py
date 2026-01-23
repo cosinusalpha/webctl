@@ -33,6 +33,13 @@ async def handle_snapshot(
     roles = request.args.get("roles")
     interactive_only = request.args.get("interactive_only", False)
     within = request.args.get("within")
+    # Large output handling options
+    grep_pattern = request.args.get("grep_pattern")
+    max_name_length = request.args.get("max_name_length")
+    visible_only = request.args.get("visible_only", False)  # Default False - bbox check is expensive
+    names_only = request.args.get("names_only", False)
+    show_query = request.args.get("show_query", False)
+    count_only = request.args.get("count_only", False)
 
     page = session_manager.get_active_page(session_id)
     if not page:
@@ -53,14 +60,30 @@ async def handle_snapshot(
                 roles=roles,
                 interactive_only=interactive_only,
                 within=within,
+                grep_pattern=grep_pattern,
+                max_name_length=max_name_length,
+                visible_only=visible_only,
+                names_only=names_only,
+                show_query=show_query,
+                count_only=count_only,
             )
+            # Collect statistics during extraction
+            stats: dict[str, Any] = {"total": 0, "by_role": {}}
             async for item in extract_a11y_view(page, options):
                 item["req_id"] = request.req_id
-                yield ItemResponse(
-                    req_id=request.req_id,
-                    view="a11y",
-                    data=item,
-                )
+                # Track stats
+                stats["total"] += 1
+                role = item.get("role", "unknown")
+                stats["by_role"][role] = stats["by_role"].get(role, 0) + 1
+                # Only yield items if not count_only mode
+                if not count_only:
+                    yield ItemResponse(
+                        req_id=request.req_id,
+                        view="a11y",
+                        data=item,
+                    )
+            # Include stats in done response
+            yield DoneResponse(req_id=request.req_id, ok=True, summary=stats)
 
         elif view == "md":
             async for item in extract_markdown_view(page):
@@ -70,6 +93,7 @@ async def handle_snapshot(
                     view="md",
                     data=item,
                 )
+            yield DoneResponse(req_id=request.req_id, ok=True)
 
         elif view == "dom-lite":
             dom_lite_options = DomLiteOptions()
@@ -80,6 +104,7 @@ async def handle_snapshot(
                     view="dom-lite",
                     data=item,
                 )
+            yield DoneResponse(req_id=request.req_id, ok=True)
 
         else:
             yield ErrorResponse(
@@ -88,8 +113,6 @@ async def handle_snapshot(
                 code="invalid_view",
             )
             return
-
-        yield DoneResponse(req_id=request.req_id, ok=True)
 
     except Exception as e:
         yield ErrorResponse(req_id=request.req_id, error=str(e))

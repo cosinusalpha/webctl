@@ -288,3 +288,86 @@ async def _poll_until(
         await asyncio.sleep(interval_ms / 1000)
 
     return False
+
+
+async def perform_wait(page: Any, until: str, timeout: int = 30000) -> None:
+    """
+    Perform a wait operation on a page.
+
+    This is a reusable function for wait operations that can be called
+    from other handlers (e.g., click --wait).
+
+    Args:
+        page: Playwright page object
+        until: Wait condition string
+        timeout: Timeout in milliseconds
+
+    Raises:
+        TimeoutError: If wait times out
+        ValueError: If condition is invalid
+    """
+    if until == "network-idle":
+        await page.wait_for_load_state("networkidle", timeout=timeout)
+
+    elif until == "load":
+        await page.wait_for_load_state("load", timeout=timeout)
+
+    elif until == "domcontentloaded":
+        await page.wait_for_load_state("domcontentloaded", timeout=timeout)
+
+    elif until == "stable":
+        await page.wait_for_load_state("networkidle", timeout=timeout)
+        last_hash = ""
+        stable_count = 0
+        while stable_count < 3:
+            await asyncio.sleep(0.2)
+            current_hash = await get_a11y_snapshot_hash(page)
+            if current_hash == last_hash:
+                stable_count += 1
+            else:
+                stable_count = 0
+                last_hash = current_hash
+
+    elif until.startswith("exists:"):
+        query_str = until[7:]
+        query = parse_query(query_str)
+
+        async def element_exists() -> bool:
+            try:
+                snapshot_str = await page.locator("body").aria_snapshot()
+                if not snapshot_str:
+                    return False
+                from ...views.a11y import parse_aria_snapshot
+
+                items = parse_aria_snapshot(snapshot_str)
+                tree: dict[str, Any] = {"role": "root", "children": items}
+                resolver = QueryResolver(tree, strict=False)
+                result = resolver.resolve(query)
+                return result.count > 0
+            except Exception:
+                return False
+
+        success = await _poll_until(element_exists, timeout)
+        if not success:
+            raise TimeoutError(f"Timeout waiting for element: {query_str}")
+
+    elif until.startswith("url-contains:"):
+        text = until[13:]
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1]
+
+        async def url_contains() -> bool:
+            return text in page.url
+
+        success = await _poll_until(url_contains, timeout)
+        if not success:
+            raise TimeoutError(f"Timeout waiting for URL to contain: {text}")
+
+    elif until.startswith("text-contains:"):
+        text = until[14:]
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1]
+        await page.wait_for_selector(f"text={text}", timeout=timeout)
+
+    else:
+        raise ValueError(f"Unknown wait condition: {until}")

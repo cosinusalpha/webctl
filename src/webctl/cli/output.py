@@ -1,7 +1,7 @@
 """
 Output formatting for CLI.
 
-Supports JSONL and human-readable key-value formats.
+Supports JSONL, compact, and human-readable key-value formats.
 """
 
 import json
@@ -19,6 +19,9 @@ _no_color = os.environ.get("NO_COLOR", "") != ""
 console = Console(legacy_windows=False, no_color=_no_color)
 error_console = Console(stderr=True, legacy_windows=False, no_color=_no_color)
 
+# Large output threshold for speedbump
+LARGE_OUTPUT_THRESHOLD = 200
+
 
 class OutputFormatter:
     """Format output based on user preferences."""
@@ -29,13 +32,20 @@ class OutputFormatter:
         color: bool = True,
         quiet: bool = False,
         result_only: bool = False,
+        force: bool = False,
     ):
         self.format = format
         # Respect NO_COLOR environment variable
         self.color = color and not _no_color
         self.quiet = quiet  # Suppress events
         self.result_only = result_only  # Only output done/error
+        self.force = force  # Show full output even if large
         self._console = Console(force_terminal=self.color, legacy_windows=False, no_color=_no_color)
+        # A11y buffering for speedbump
+        self._a11y_buffer: list[dict[str, Any]] = []
+        self._a11y_count = 0
+        self._a11y_stats: dict[str, Any] = {}
+        self._summary_printed = False
 
     def output(self, data: dict[str, Any]) -> None:
         """Output data in the configured format."""
@@ -47,15 +57,151 @@ class OutputFormatter:
         if self.result_only and msg_type not in ("done", "error"):
             return
 
+        # For compact format with a11y view, use buffering for speedbump
+        if self.format == "compact" and msg_type == "item" and data.get("view") == "a11y":
+            self._buffer_a11y_item(data)
+            return
+
+        # Handle done response - flush a11y buffer if needed
+        if msg_type == "done" and self._a11y_count > 0:
+            self._a11y_stats = data.get("summary", {})
+            self._flush_a11y_output()
+            # Don't output the done message separately in compact mode
+            if self.format == "compact":
+                return
+
         if self.format == "jsonl":
             self._output_jsonl(data)
         elif self.format == "json":
             self._output_json(data)
         elif self.format == "kv":
             self._output_kv(data)
+        elif self.format == "compact":
+            self._output_compact(data)
+        elif self.format == "full":
+            # Full format is like auto but outputs all a11y details
+            self._output_auto(data)
         else:
             # Auto format based on content
             self._output_auto(data)
+
+    def _buffer_a11y_item(self, data: dict[str, Any]) -> None:
+        """Buffer a11y items for speedbump logic."""
+        self._a11y_count += 1
+        # Only buffer up to threshold + preview (20 items)
+        if self.force or self._a11y_count <= LARGE_OUTPUT_THRESHOLD + 20:
+            self._a11y_buffer.append(data)
+
+    def _flush_a11y_output(self) -> None:
+        """Flush buffered a11y output with summary header and speedbump if needed."""
+        total = self._a11y_stats.get("total", self._a11y_count)
+        by_role = self._a11y_stats.get("by_role", {})
+
+        # Print summary header
+        self._print_summary_header(total, by_role)
+
+        # Check if we hit the speedbump
+        if total > LARGE_OUTPUT_THRESHOLD and not self.force:
+            # Print warning
+            if self.color:
+                self._console.print(
+                    f"[yellow]Large output: {total} elements. "
+                    f"Showing preview (first 20). Use --force for full output.[/yellow]"
+                )
+            else:
+                print(
+                    f"Large output: {total} elements. "
+                    f"Showing preview (first 20). Use --force for full output."
+                )
+            print()
+            # Output only first 20 items
+            for item in self._a11y_buffer[:20]:
+                self._output_a11y_compact(item.get("data", item))
+        else:
+            # Output all buffered items
+            for item in self._a11y_buffer:
+                self._output_a11y_compact(item.get("data", item))
+
+        # Reset buffer
+        self._a11y_buffer = []
+        self._a11y_count = 0
+        self._a11y_stats = {}
+
+    def _print_summary_header(self, total: int, by_role: dict[str, int]) -> None:
+        """Print summary header showing element counts."""
+        if self._summary_printed:
+            return
+        self._summary_printed = True
+
+        # Build role breakdown (top 5 by count)
+        sorted_roles = sorted(by_role.items(), key=lambda x: -x[1])[:5]
+        role_str = ", ".join(f"{count} {role}" for role, count in sorted_roles)
+
+        if self.color:
+            self._console.print(f"[dim]# Snapshot: {total} elements ({role_str})[/dim]")
+            self._console.print(
+                "[dim]# Use --format full for details, --grep to filter, --force to show all[/dim]"
+            )
+        else:
+            print(f"# Snapshot: {total} elements ({role_str})")
+            print("# Use --format full for details, --grep to filter, --force to show all")
+        print()
+
+    def _output_compact(self, data: dict[str, Any]) -> None:
+        """Output in compact format."""
+        msg_type = data.get("type")
+
+        if msg_type == "item":
+            view = data.get("view", "")
+            if view == "a11y":
+                self._output_a11y_compact(data.get("data", data))
+            else:
+                # For non-a11y views, fall back to auto
+                self._output_auto(data)
+        elif msg_type == "error":
+            self._output_error(data)
+        elif msg_type == "done":
+            # For non-a11y commands, output done normally
+            # (a11y done is handled in flush above)
+            self._output_done(data)
+        else:
+            self._output_auto(data)
+
+    def _output_a11y_compact(self, data: dict[str, Any]) -> None:
+        """Output an a11y item in compact one-line format."""
+        node_id = data.get("id", "")
+        role = data.get("role", "")
+        name = data.get("name", "")
+
+        # Build state indicators
+        states = []
+        if not data.get("enabled", True):
+            states.append("disabled")
+        if data.get("checked") == "true" or data.get("checked") is True:
+            states.append("checked")
+        if data.get("expanded") == "true" or data.get("expanded") is True:
+            states.append("expanded")
+        if data.get("level"):
+            states.append(f"level={data.get('level')}")
+        if data.get("required"):
+            states.append("required")
+
+        state_str = f" [{', '.join(states)}]" if states else ""
+        name_str = f' "{name}"' if name else ""
+
+        # Add query if present
+        query = data.get("query", "")
+        query_str = f"  [{query}]" if query else ""
+
+        if self.color:
+            if query:
+                self._console.print(
+                    f"[dim]{node_id}[/dim] {role}{name_str}{state_str}  [cyan][{query}][/cyan]"
+                )
+            else:
+                self._console.print(f"[dim]{node_id}[/dim] {role}{name_str}{state_str}")
+        else:
+            print(f"{node_id} {role}{name_str}{state_str}{query_str}")
 
     def _output_jsonl(self, data: dict[str, Any]) -> None:
         """Output as single JSON line."""
@@ -218,6 +364,11 @@ class OutputFormatter:
 
     def _output_status(self, data: dict[str, Any]) -> None:
         """Output session status with pages."""
+        # Check for brief mode first
+        if data.get("brief"):
+            self._output_status_brief(data)
+            return
+
         pages = data.get("pages", [])
         session_id = data.get("session_id", "")
         mode = data.get("mode", "")
@@ -238,6 +389,22 @@ class OutputFormatter:
             for page in pages:
                 active = "*" if page.get("active") else " "
                 print(f"  {active} {page.get('page_id')} {page.get('url', '')[:60]}")
+
+    def _output_status_brief(self, data: dict[str, Any]) -> None:
+        """Output one-line status summary."""
+        url = data.get("url", "")[:50]
+        element_count = data.get("element_count", 0)
+        console = data.get("console", {})
+        error_count = console.get("error", 0)
+        state = data.get("state", "idle")
+
+        if self.color:
+            self._console.print(
+                f"[cyan]{url}[/cyan] | {element_count} elements | "
+                f"[red]{error_count}[/red] errors | {state}"
+            )
+        else:
+            print(f"{url} | {element_count} elements | {error_count} errors | {state}")
 
     def _output_event(self, data: dict[str, Any]) -> None:
         """Output an event."""
@@ -282,15 +449,38 @@ class OutputFormatter:
 
         if ok:
             if summary:
-                if self.color:
-                    self._console.print(f"[green]OK[/green] {json.dumps(summary)}")
+                # Check if this is a11y count stats (has total and by_role)
+                if "total" in summary and "by_role" in summary:
+                    self._output_a11y_stats(summary)
                 else:
-                    print(f"OK {json.dumps(summary)}")
+                    if self.color:
+                        self._console.print(f"[green]OK[/green] {json.dumps(summary)}")
+                    else:
+                        print(f"OK {json.dumps(summary)}")
         else:
             if self.color:
                 error_console.print("[red]FAILED[/red]")
             else:
                 print("FAILED", file=sys.stderr)
+
+    def _output_a11y_stats(self, summary: dict[str, Any]) -> None:
+        """Output a11y statistics in a readable format."""
+        total = summary.get("total", 0)
+        by_role = summary.get("by_role", {})
+
+        # Sort roles by count (descending) and take top entries
+        sorted_roles = sorted(by_role.items(), key=lambda x: -x[1])
+        role_parts = [f"{count} {role}" for role, count in sorted_roles[:6]]
+        if len(sorted_roles) > 6:
+            other_count = sum(count for _, count in sorted_roles[6:])
+            role_parts.append(f"{other_count} other")
+
+        role_str = ", ".join(role_parts)
+
+        if self.color:
+            self._console.print(f"[green]{total}[/green] elements ({role_str})")
+        else:
+            print(f"{total} elements ({role_str})")
 
 
 def print_error(message: str) -> None:

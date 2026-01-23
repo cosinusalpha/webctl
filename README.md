@@ -230,12 +230,41 @@ webctl stop --daemon                      # Close browser
 - `role=button` - By ARIA role (button, link, textbox, combobox, checkbox)
 - `name~="partial"` - Partial match (preferred, more robust)
 
+### Zero-Context Assessment
+
+```bash
+webctl snapshot --count          # 234 elements (45 button, 89 link, ...)
+webctl status --brief            # https://... | 234 elements | 0 errors | idle
+```
+
+### Output Control (Large Pages)
+
+webctl uses compact format by default with automatic truncation:
+- Shows summary: "# Snapshot: 234 elements (45 button, 89 link, ...)"
+- Truncates at 200 elements with preview
+- Use `--force` to see all elements
+- Use `--grep "pattern"` to filter
+
+```bash
+webctl snapshot                           # Compact output (fast)
+webctl snapshot --show-query              # Include query for each element
+webctl snapshot --interactive-only        # Only buttons/links/inputs
+webctl snapshot --grep "submit|button"    # Filter by regex pattern
+```
+
+### Reliable Actions
+
+```bash
+webctl click '...' --retry 3 --wait network-idle
+webctl fill-form '{"Email": "user@x.com", "Password": "***"}'
+```
+
 **Tips:**
 
 - Use `--interactive-only` to reduce output (only buttons, links, inputs)
 - Use `name~=` for partial matching (handles minor text changes)
 - Use `webctl query "..."` if element not found - shows suggestions
-- Check `webctl status` for console error counts before investigating
+- Check `webctl status --brief` for quick page state
 
 ---
 
