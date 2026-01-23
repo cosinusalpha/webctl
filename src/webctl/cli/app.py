@@ -20,7 +20,7 @@ if sys.platform == "win32":
 
 from ..config import WebctlConfig, get_daemon_cmd
 from ..protocol.client import DaemonClient
-from ..protocol.transport import TransportType
+from ..protocol.transport import SocketError
 from .output import OutputFormatter, print_error, print_info, print_success
 
 app = typer.Typer(
@@ -33,24 +33,16 @@ console = Console()
 
 # Global options
 _session: str = "default"
-_format: str = "auto"
+_format: str = "compact"
 _timeout: int = 30000
 _quiet: bool = False
 _result_only: bool = False
+_force: bool = False
 
 
 def get_client() -> DaemonClient:
     """Get a daemon client."""
-    config = WebctlConfig.load()
-
-    transport_type = None
-    tcp_port = None
-
-    if config.transport == "tcp" or sys.platform == "win32":
-        transport_type = TransportType.TCP
-        tcp_port = config.tcp_port
-
-    return DaemonClient(_session, transport_type, tcp_port)
+    return DaemonClient(_session)
 
 
 async def ensure_daemon(session_id: str) -> bool:
@@ -63,7 +55,7 @@ async def ensure_daemon(session_id: str) -> bool:
         await client.connect()
         await client.close()
         return True
-    except Exception:
+    except (OSError, SocketError):
         pass
 
     if not config.auto_start:
@@ -107,7 +99,9 @@ async def ensure_daemon(session_id: str) -> bool:
 
 async def run_command(command: str, args: dict[str, Any]) -> None:
     """Run a command against the daemon."""
-    formatter = OutputFormatter(format=_format, quiet=_quiet, result_only=_result_only)
+    formatter = OutputFormatter(
+        format=_format, quiet=_quiet, result_only=_result_only, force=_force
+    )
 
     if not await ensure_daemon(_session):
         raise typer.Exit(1)
@@ -123,6 +117,9 @@ async def run_command(command: str, args: dict[str, Any]) -> None:
             if response.type == "error":
                 raise typer.Exit(1)
 
+    except SocketError as e:
+        print_error(str(e))
+        raise typer.Exit(1) from None
     except ConnectionError as e:
         print_error(f"Connection failed: {e}")
         raise typer.Exit(1) from None
@@ -134,21 +131,28 @@ async def run_command(command: str, args: dict[str, Any]) -> None:
 def main(
     session: str = typer.Option("default", "--session", "-s", help="Session ID"),
     format: str = typer.Option(
-        "auto", "--format", "-f", help="Output format: auto, jsonl, json, kv"
+        "compact",
+        "--format",
+        "-f",
+        help="Output format: compact (default), auto, full, jsonl, json, kv",
     ),
     timeout: int = typer.Option(30000, "--timeout", "-t", help="Timeout in milliseconds"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress events, show only results"),
     result_only: bool = typer.Option(
         False, "--result-only", "-r", help="Output only the final result (no items/events)"
     ),
+    force: bool = typer.Option(
+        False, "--force", "-F", help="Show full output even if large (>200 elements)"
+    ),
 ) -> None:
     """webctl - Stateful, agent-first browser interface"""
-    global _session, _format, _timeout, _quiet, _result_only
+    global _session, _format, _timeout, _quiet, _result_only, _force
     _session = session
     _format = format
     _timeout = timeout
     _quiet = quiet
     _result_only = result_only
+    _force = force
 
 
 # === Setup and Diagnostics ===
@@ -358,26 +362,25 @@ AGENT_PROMPT = """# webctl - Browser Control
 Start: `webctl start` | End: `webctl stop --daemon`
 
 ## Quick Reference
+- `webctl snapshot --count` - Just element counts (zero context)
 - `webctl snapshot --interactive-only` - See clickable elements
+- `webctl snapshot --show-query` - Show query for each element
 - `webctl click 'role=button name~="Text"'` - Click
-- `webctl type 'role=textbox name~="Field"' "value"` - Type
-- `webctl type '...' "value" --submit` - Type + Enter
-- `webctl select 'role=combobox name~="..."' --label "Option"` - Dropdown
-- `webctl wait network-idle` - Wait for page load
-- `webctl wait 'exists:role=button name~="..."'` - Wait for element
+- `webctl click '...' --retry 3 --wait network-idle` - Reliable click
+- `webctl type 'role=textbox name~="Field"' "value" --submit` - Type + Enter
+- `webctl fill-form '{"Email": "x@y.com", "Password": "***"}'` - Bulk fill
+- `webctl status --brief` - Quick page state check
 
 ## Query Syntax
 Quote: `'role=button name~="Text"'` (single outside, double for name)
-- `name~="text"` - Contains (PREFERRED - more robust)
+- `name~="text"` - Contains (PREFERRED)
 - `name="text"` - Exact match (brittle)
 
 ## Reduce Output
-- `--interactive-only` - Only buttons/links/inputs (always use this)
-- `--within "role=main"` - Scope to area (skip nav/footer)
-
-## If Element Not Found
-`webctl query 'your-query'` - Debug what's available
-`webctl snapshot --interactive-only` - See all elements
+- `--count` - Just counts (zero context cost)
+- `--interactive-only` - Only buttons/links/inputs
+- `--grep "pattern"` - Filter by regex
+- `--within "role=main"` - Scope to area
 
 Run `webctl --help` for more.
 """
@@ -402,6 +405,7 @@ CLI tool for browser automation. Use this instead of MCP browser tools - it give
 4. **ALWAYS use `--interactive-only`** with snapshot (unless you need to read page text)
 5. **ALWAYS use `name~="text"`** not `name="text"` (see "Why name~=" below)
 6. **ALWAYS quote queries:** `'role=button name~="Submit"'`
+7. **Output is compact by default** - use `--force` if truncated (>200 elements)
 
 ## Quick Start Template
 
@@ -564,6 +568,67 @@ webctl snapshot --interactive-only --limit 30
 ```
 
 Caps output at 30 elements. Use when pages have many elements.
+
+---
+
+## Large Output Handling
+
+webctl uses **compact output by default**. On large pages (>200 elements), it shows:
+- Summary header: `# Snapshot: 523 elements (89 button, 156 link, ...)`
+- Preview of first 20 elements
+- Hint: "Use --force for full output"
+
+### Commands for Large Pages
+
+```bash
+webctl snapshot                              # Compact output (fast)
+webctl snapshot --force                      # Full output even if large
+webctl snapshot --grep "button|submit"       # Filter by regex pattern
+webctl snapshot --names-only                 # Minimal output (role + name only)
+webctl snapshot --max-name-length 50         # Truncate long names
+```
+
+### When to Use Each Option
+
+| Scenario | Command |
+|----------|---------|
+| Need all elements | `--force` |
+| Looking for specific text | `--grep "pattern"` |
+| Too much output | `--interactive-only` or `--within "role=main"` |
+
+---
+
+## AI-Friendly Features
+
+### Quick Page Assessment (Zero Context)
+
+```bash
+webctl snapshot --count                    # Just counts, no elements
+webctl status --brief                      # One-line: URL | elements | errors | state
+```
+
+### Copy-Paste Ready Queries
+
+```bash
+webctl snapshot --show-query --interactive-only
+# n1 button "Submit"  [role=button name~="Submit"]
+# Copy the query in brackets to use with click/type
+```
+
+### Reliable Actions
+
+```bash
+webctl click '...' --retry 3               # Retry up to 3 times
+webctl click '...' --wait network-idle     # Wait after click
+webctl type '...' "text" --submit --wait network-idle
+```
+
+### Bulk Form Fill
+
+```bash
+webctl fill-form '{"Email": "user@example.com", "Password": "secret"}'
+webctl fill-form '{"Remember me": true}'   # Checkboxes use boolean
+```
 
 ---
 
@@ -883,12 +948,17 @@ webctl stop --daemon
 | Start browser | `webctl start` |
 | Start headless | `webctl start --mode unattended` |
 | Go to URL | `webctl navigate "URL"` |
+| Count elements | `webctl snapshot --count` |
 | See elements | `webctl snapshot --interactive-only` |
+| Show queries | `webctl snapshot --show-query --interactive-only` |
+| Quick status | `webctl status --brief` |
 | Click button | `webctl click 'role=button name~="Text"'` |
+| Click + retry | `webctl click '...' --retry 3` |
+| Click + wait | `webctl click '...' --wait network-idle` |
 | Type in field | `webctl type 'role=textbox name~="Field"' "value"` |
-| Type + Enter | `webctl type 'role=textbox name~="Field"' "value" --submit` |
+| Type + Enter | `webctl type '...' "value" --submit` |
+| Fill form | `webctl fill-form '{"Email": "x", "Password": "y"}'` |
 | Select dropdown | `webctl select 'role=combobox name~="Field"' --label "Option"` |
-| Check checkbox | `webctl check 'role=checkbox name~="Field"'` |
 | Wait for load | `webctl wait network-idle` |
 | Wait for element | `webctl wait 'exists:role=button name~="Text"'` |
 | Debug query | `webctl query 'role=button name~="Text"'` |
@@ -1247,9 +1317,18 @@ def cmd_stop(
 
 
 @app.command("status")
-def cmd_status() -> None:
-    """Get session status."""
-    asyncio.run(run_command("session.status", {"session": _session}))
+def cmd_status(
+    brief: bool = typer.Option(
+        False, "--brief", "-b", help="One-line summary (URL | elements | errors | state)"
+    ),
+) -> None:
+    """Get session status.
+
+    Examples:
+        webctl status          # Full status
+        webctl status --brief  # One-line: URL | elements | errors | state
+    """
+    asyncio.run(run_command("session.status", {"session": _session, "brief": brief}))
 
 
 @app.command("save")
@@ -1345,8 +1424,38 @@ def cmd_snapshot(
     within: str | None = typer.Option(
         None, "--within", "-w", help="Scope to elements within container (e.g., 'role=main')"
     ),
+    grep: str | None = typer.Option(
+        None, "--grep", "-g", help="Filter elements by pattern (regex on role+name)"
+    ),
+    max_name_length: int | None = typer.Option(
+        None, "--max-name-length", help="Truncate long names (default: no limit)"
+    ),
+    names_only: bool = typer.Option(
+        False, "--names-only", "-n", help="Only output role and name (no states/attributes)"
+    ),
+    visible_only: bool = typer.Option(
+        False, "--visible-only", help="Filter to viewport-visible elements only (slow - uses bbox)"
+    ),
+    show_query: bool = typer.Option(
+        False, "--show-query", "-Q", help="Show the query string to target each element"
+    ),
+    count_only: bool = typer.Option(
+        False, "--count", "-c", help="Only output element counts, no elements (zero context cost)"
+    ),
 ) -> None:
-    """Take a snapshot of the current page."""
+    """Take a snapshot of the current page.
+
+    Output is compact by default with a summary header. On large pages (>200 elements),
+    it shows a preview. Use --force to see all elements.
+
+    Examples:
+        webctl snapshot                          # Compact output
+        webctl snapshot --count                  # Just counts (zero context)
+        webctl snapshot --show-query             # Include query for each element
+        webctl snapshot --interactive-only       # Only buttons/links/inputs
+        webctl snapshot --grep "button|submit"   # Filter by pattern
+        webctl snapshot --force                  # Full output even if large
+    """
     asyncio.run(
         run_command(
             "snapshot",
@@ -1359,6 +1468,12 @@ def cmd_snapshot(
                 "roles": roles,
                 "interactive_only": interactive_only,
                 "within": within,
+                "grep_pattern": grep,
+                "max_name_length": max_name_length,
+                "names_only": names_only,
+                "visible_only": visible_only,
+                "show_query": show_query,
+                "count_only": count_only,
                 "session": _session,
             },
         )
@@ -1404,9 +1519,34 @@ def cmd_query(
 @app.command("click")
 def cmd_click(
     query: str = typer.Argument(..., help="Query to find element"),
+    retry: int = typer.Option(0, "--retry", "-R", help="Number of retries on failure"),
+    retry_delay: int = typer.Option(1000, "--retry-delay", help="Delay between retries in ms"),
+    wait_after: str | None = typer.Option(
+        None,
+        "--wait",
+        "-w",
+        help="Wait condition after click (e.g., 'network-idle', 'exists:role=dialog')",
+    ),
 ) -> None:
-    """Click an element."""
-    asyncio.run(run_command("click", {"query": query, "session": _session}))
+    """Click an element.
+
+    Examples:
+        webctl click 'role=button name~="Submit"'
+        webctl click 'role=button name~="Submit"' --retry 3
+        webctl click 'role=button name~="Submit"' --wait network-idle
+    """
+    asyncio.run(
+        run_command(
+            "click",
+            {
+                "query": query,
+                "retry": retry,
+                "retry_delay": retry_delay,
+                "wait_after": wait_after,
+                "session": _session,
+            },
+        )
+    )
 
 
 @app.command("type")
@@ -1415,12 +1555,32 @@ def cmd_type(
     text: str = typer.Argument(..., help="Text to type"),
     clear: bool = typer.Option(False, "--clear", "-c", help="Clear field first"),
     submit: bool = typer.Option(False, "--submit", help="Press Enter after typing"),
+    retry: int = typer.Option(0, "--retry", "-R", help="Number of retries on failure"),
+    retry_delay: int = typer.Option(1000, "--retry-delay", help="Delay between retries in ms"),
+    wait_after: str | None = typer.Option(
+        None, "--wait", "-w", help="Wait condition after typing (e.g., 'network-idle')"
+    ),
 ) -> None:
-    """Type text into an element."""
+    """Type text into an element.
+
+    Examples:
+        webctl type 'role=textbox name~="Email"' "user@example.com"
+        webctl type 'role=textbox name~="Search"' "query" --submit
+        webctl type 'role=textbox name~="Search"' "query" --submit --wait network-idle
+    """
     asyncio.run(
         run_command(
             "type",
-            {"query": query, "text": text, "clear": clear, "submit": submit, "session": _session},
+            {
+                "query": query,
+                "text": text,
+                "clear": clear,
+                "submit": submit,
+                "retry": retry,
+                "retry_delay": retry_delay,
+                "wait_after": wait_after,
+                "session": _session,
+            },
         )
     )
 
@@ -1494,6 +1654,43 @@ def cmd_upload(
         webctl upload 'role=textbox name~="File"' -f ~/image.png
     """
     asyncio.run(run_command("upload", {"query": query, "file": file, "session": _session}))
+
+
+@app.command("fill-form")
+def cmd_fill_form(
+    fields_json: str = typer.Argument(..., help="JSON object of field:value pairs"),
+    within: str | None = typer.Option(
+        None, "--within", "-w", help="Scope to form container (e.g., 'role=form')"
+    ),
+) -> None:
+    """Fill multiple form fields at once.
+
+    Fields are specified as a JSON object where keys are field names and values are:
+    - String: for text inputs
+    - Boolean: for checkboxes (true=check, false=uncheck)
+
+    Examples:
+        webctl fill-form '{"Email": "user@example.com", "Password": "secret"}'
+        webctl fill-form '{"Email": "x@y.com", "Remember me": true}' --within "role=form"
+    """
+    import json
+
+    try:
+        fields = json.loads(fields_json)
+    except json.JSONDecodeError as e:
+        print_error(f"Invalid JSON: {e}")
+        raise typer.Exit(1) from None
+
+    if not isinstance(fields, dict):
+        print_error("Fields must be a JSON object (dictionary)")
+        raise typer.Exit(1)
+
+    asyncio.run(
+        run_command(
+            "fill-form",
+            {"fields": fields, "within": within, "session": _session},
+        )
+    )
 
 
 # === Wait Commands ===
@@ -1590,9 +1787,6 @@ def cmd_config_show() -> None:
     print(f"  exists: {config_path.exists()}")
     print()
     print("Settings:")
-    print(f"  transport: {config.transport}")
-    print(f"  tcp_host: {config.tcp_host}")
-    print(f"  tcp_port: {config.tcp_port or 'auto'}")
     print(f"  idle_timeout: {config.idle_timeout}s")
     print(f"  auto_start: {config.auto_start}")
     print(f"  default_session: {config.default_session}")
@@ -1613,9 +1807,6 @@ def cmd_config_get(
     config = WebctlConfig.load()
 
     valid_keys = [
-        "transport",
-        "tcp_host",
-        "tcp_port",
         "idle_timeout",
         "auto_start",
         "default_session",
@@ -1647,7 +1838,7 @@ def cmd_config_set(
 
     # Type conversion based on key
     bool_keys = ["auto_start", "a11y_include_bbox", "a11y_include_path_hint", "screenshot_on_error"]
-    int_keys = ["tcp_port", "idle_timeout"]
+    int_keys = ["idle_timeout"]
     nullable_str_keys = ["screenshot_error_dir"]
 
     typed_value: bool | int | str | None
@@ -1665,9 +1856,6 @@ def cmd_config_set(
         typed_value = value
 
     valid_keys = [
-        "transport",
-        "tcp_host",
-        "tcp_port",
         "idle_timeout",
         "auto_start",
         "default_session",

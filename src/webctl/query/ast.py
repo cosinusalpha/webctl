@@ -3,7 +3,6 @@ AST node definitions for the query language.
 """
 
 from dataclasses import dataclass
-from typing import Union
 
 
 @dataclass(frozen=True)
@@ -83,15 +82,15 @@ class OrExpr:
     children: tuple["QueryExpr", ...]
 
 
-QueryExpr = Union[
-    RoleFilter,
-    NameFilter,
-    TextFilter,
-    IdFilter,
-    StateFilter,
-    WithinExpr,
-    NearExpr,
-    NthExpr,
-    AndExpr,
-    OrExpr,
-]
+QueryExpr = (
+    RoleFilter
+    | NameFilter
+    | TextFilter
+    | IdFilter
+    | StateFilter
+    | WithinExpr
+    | NearExpr
+    | NthExpr
+    | AndExpr
+    | OrExpr
+)

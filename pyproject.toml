@@ -28,7 +28,6 @@ dependencies = [
     "pydantic>=2.0.0",
     "aiofiles>=24.0.0",
     "markdownify>=0.13.0",
-    "deepdiff>=7.0.0",
 ]
 
 [project.urls]
@@ -67,7 +66,6 @@ ignore = [
     "E501",    # Line length handled by formatter; remaining are embedded JS strings
     "SIM102",  # Nested ifs can be more readable
     "SIM105",  # try/except/pass is intentional in event handlers
-    "UP007",   # Union[] is fine, X | Y requires Python 3.10+
 ]
 
 [tool.mypy]

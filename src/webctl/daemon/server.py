@@ -15,7 +15,6 @@ from ..protocol.messages import ErrorResponse, EventResponse, Request
 from ..protocol.transport import (
     ClientConnection,
     TransportServer,
-    TransportType,
     get_server_transport,
 )
 from .event_emitter import EventEmitter
@@ -47,19 +46,9 @@ class DaemonServer:
         self._running = True
         self._last_activity = asyncio.get_running_loop().time()
 
-        # Start event emitter
         await self._event_emitter.start()
 
-        # Create transport
-        transport_type = None
-        if self.config.transport == "tcp":
-            transport_type = TransportType.TCP
-        elif self.config.transport == "socket":
-            transport_type = TransportType.UNIX_SOCKET
-
-        self._transport = get_server_transport(
-            self.session_id, self._handle_client, transport_type, self.config.tcp_port
-        )
+        self._transport = get_server_transport(self.session_id, self._handle_client)
         await self._transport.start()
 
         print(f"webctl daemon started on {self._transport.get_address()}")

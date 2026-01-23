@@ -2,11 +2,12 @@
 Interaction command handlers (click, type, scroll, etc.).
 """
 
+import asyncio
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Coroutine
 from dataclasses import dataclass
 from difflib import get_close_matches
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from playwright.async_api import Page
 
@@ -17,6 +18,28 @@ from ...query.resolver import QueryResolver
 from ..session_manager import SessionManager
 from .error_screenshot import capture_error_screenshot
 from .registry import register
+
+T = TypeVar("T")
+
+
+async def with_retry(
+    coro_fn: Callable[[], Coroutine[Any, Any, T]],
+    retries: int,
+    delay_ms: int,
+) -> T:
+    """Execute coroutine with retries."""
+    last_error: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            return await coro_fn()
+        except Exception as e:
+            last_error = e
+            if attempt < retries:
+                await asyncio.sleep(delay_ms / 1000)
+    if last_error:
+        raise last_error
+    raise RuntimeError("Retry failed with no error")
+
 
 # Aria role type from Playwright
 AriaRole = str  # Playwright uses Literal type, we use str for flexibility
@@ -202,6 +225,9 @@ async def handle_click(
     """Click an element."""
     session_id = request.args.get("session", "default")
     query = request.args.get("query")
+    retry = request.args.get("retry", 0)
+    retry_delay = request.args.get("retry_delay", 1000)
+    wait_after = request.args.get("wait_after")
 
     if not query:
         yield ErrorResponse(
@@ -246,12 +272,23 @@ async def handle_click(
             else page.get_by_role(cast(Any, role))
         )
 
-        await locator.first.click()
+        # Click with retry support
+        async def do_click() -> None:
+            await locator.first.click()
+
+        await with_retry(do_click, retry, retry_delay)
+
+        summary: dict[str, Any] = {"clicked": {"role": role, "name": name}}
+        if wait_after:
+            from .wait import perform_wait
+
+            await perform_wait(page, wait_after, timeout=30000)
+            summary["waited_for"] = wait_after
 
         yield DoneResponse(
             req_id=request.req_id,
             ok=True,
-            summary={"clicked": {"role": role, "name": name}},
+            summary=summary,
         )
 
     except Exception as e:
@@ -274,6 +311,9 @@ async def handle_type(
     text = request.args.get("text", "")
     clear = request.args.get("clear", False)
     submit = request.args.get("submit", False)
+    retry = request.args.get("retry", 0)
+    retry_delay = request.args.get("retry_delay", 1000)
+    wait_after = request.args.get("wait_after")
 
     if not query:
         yield ErrorResponse(
@@ -316,18 +356,27 @@ async def handle_type(
             else page.get_by_role(cast(Any, role))
         )
 
-        if clear:
-            await locator.first.clear()
+        # Type with retry support
+        async def do_type() -> None:
+            if clear:
+                await locator.first.clear()
+            await locator.first.fill(text)
+            if submit:
+                await locator.first.press("Enter")
 
-        await locator.first.fill(text)
+        await with_retry(do_type, retry, retry_delay)
 
-        if submit:
-            await locator.first.press("Enter")
+        summary: dict[str, Any] = {"typed": {"role": role, "name": name, "text_length": len(text)}}
+        if wait_after:
+            from .wait import perform_wait
+
+            await perform_wait(page, wait_after, timeout=30000)
+            summary["waited_for"] = wait_after
 
         yield DoneResponse(
             req_id=request.req_id,
             ok=True,
-            summary={"typed": {"role": role, "name": name, "text_length": len(text)}},
+            summary=summary,
         )
 
     except Exception as e:
@@ -758,7 +807,6 @@ async def handle_upload(
             else page.get_by_role(cast(Any, role))
         )
 
-        # Set the file
         await locator.first.set_input_files(file_path)
 
         yield DoneResponse(
@@ -775,3 +823,115 @@ async def handle_upload(
             code="upload_failed",
             details={"query": query, "file": file_path, "screenshot": screenshot_path},
         )
+
+
+@register("fill-form")
+async def handle_fill_form(
+    request: Request, session_manager: SessionManager, **kwargs: Any
+) -> AsyncIterator[Response]:
+    """Fill multiple form fields at once."""
+    session_id = request.args.get("session", "default")
+    fields = request.args.get("fields", {})
+
+    if not fields:
+        yield ErrorResponse(
+            req_id=request.req_id,
+            error="No fields provided",
+            code="missing_argument",
+        )
+        return
+
+    page = session_manager.get_active_page(session_id)
+    if not page:
+        yield ErrorResponse(
+            req_id=request.req_id,
+            error="No active page",
+            code="no_active_page",
+        )
+        return
+
+    results: list[dict[str, Any]] = []
+
+    for field_name, value in fields.items():
+        try:
+            if isinstance(value, bool):
+                try:
+                    locator = page.get_by_role("checkbox", name=field_name)
+                    if value:
+                        await locator.first.check()
+                    else:
+                        await locator.first.uncheck()
+                    results.append({"field": field_name, "ok": True, "action": "checkbox"})
+                except Exception:
+                    # Try as a label click
+                    locator = page.get_by_label(field_name)
+                    if value:
+                        await locator.first.check()
+                    else:
+                        await locator.first.uncheck()
+                    results.append({"field": field_name, "ok": True, "action": "checkbox"})
+
+            elif isinstance(value, str):
+                filled = False
+
+                # Strategy 1: Try by role=textbox with name
+                try:
+                    locator = page.get_by_role("textbox", name=field_name)
+                    await locator.first.fill(value)
+                    filled = True
+                except Exception:
+                    pass
+
+                # Strategy 2: Try by label
+                if not filled:
+                    try:
+                        locator = page.get_by_label(field_name)
+                        await locator.first.fill(value)
+                        filled = True
+                    except Exception:
+                        pass
+
+                # Strategy 3: Try by placeholder
+                if not filled:
+                    try:
+                        locator = page.get_by_placeholder(field_name)
+                        await locator.first.fill(value)
+                        filled = True
+                    except Exception:
+                        pass
+
+                if filled:
+                    results.append({"field": field_name, "ok": True, "action": "fill"})
+                else:
+                    results.append(
+                        {
+                            "field": field_name,
+                            "ok": False,
+                            "error": f"Could not find field: {field_name}",
+                        }
+                    )
+
+            else:
+                results.append(
+                    {
+                        "field": field_name,
+                        "ok": False,
+                        "error": f"Unsupported value type: {type(value).__name__}",
+                    }
+                )
+
+        except Exception as e:
+            results.append({"field": field_name, "ok": False, "error": str(e)})
+
+    success_count = sum(1 for r in results if r.get("ok"))
+    total_count = len(results)
+
+    yield DoneResponse(
+        req_id=request.req_id,
+        ok=success_count == total_count,
+        summary={
+            "filled": success_count,
+            "total": total_count,
+            "results": results,
+        },
+    )

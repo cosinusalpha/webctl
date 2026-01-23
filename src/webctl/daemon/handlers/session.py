@@ -20,7 +20,6 @@ async def handle_session_start(
     session_id = request.args.get("session", "default")
     mode = request.args.get("mode", "attended")
 
-    # Check if session already exists
     if session_manager.get_session(session_id):
         yield ErrorResponse(
             req_id=request.req_id,
@@ -73,6 +72,7 @@ async def handle_session_status(
 ) -> AsyncIterator[Response]:
     """Get session status."""
     session_id = request.args.get("session", "default")
+    brief = request.args.get("brief", False)
 
     session = session_manager.get_session(session_id)
     if not session:
@@ -94,6 +94,28 @@ async def handle_session_status(
             counts[log["level"]] += 1
         console_counts = dict(counts)
 
+    # Get current URL and page state
+    url = ""
+    title = ""
+    state = "idle"
+    page = session_manager.get_active_page(session_id)
+    if page:
+        url = page.url
+        try:
+            title = await page.title()
+        except Exception:
+            title = ""
+
+    # For brief mode, get element count (lightweight estimate)
+    element_count = 0
+    if brief and page:
+        try:
+            snapshot_str = await page.locator("body").aria_snapshot()
+            # Quick count: each "- " prefix indicates an element
+            element_count = snapshot_str.count("\n- ") + 1 if snapshot_str else 0
+        except Exception:
+            element_count = 0
+
     yield ItemResponse(
         req_id=request.req_id,
         view="status",
@@ -104,6 +126,11 @@ async def handle_session_status(
             "page_count": len(pages),
             "pages": pages,
             "console": console_counts,
+            "url": url,
+            "title": title,
+            "state": state,
+            "element_count": element_count,
+            "brief": brief,
         },
     )
     yield DoneResponse(req_id=request.req_id, ok=True)

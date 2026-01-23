@@ -230,30 +230,129 @@ webctl stop --daemon                      # Close browser
 - `role=button` - By ARIA role (button, link, textbox, combobox, checkbox)
 - `name~="partial"` - Partial match (preferred, more robust)
 
+### Zero-Context Assessment
+
+```bash
+webctl snapshot --count          # 234 elements (45 button, 89 link, ...)
+webctl status --brief            # https://... | 234 elements | 0 errors | idle
+```
+
+### Output Control (Large Pages)
+
+webctl uses compact format by default with automatic truncation:
+- Shows summary: "# Snapshot: 234 elements (45 button, 89 link, ...)"
+- Truncates at 200 elements with preview
+- Use `--force` to see all elements
+- Use `--grep "pattern"` to filter
+
+```bash
+webctl snapshot                           # Compact output (fast)
+webctl snapshot --show-query              # Include query for each element
+webctl snapshot --interactive-only        # Only buttons/links/inputs
+webctl snapshot --grep "submit|button"    # Filter by regex pattern
+```
+
+### Reliable Actions
+
+```bash
+webctl click '...' --retry 3 --wait network-idle
+webctl fill-form '{"Email": "user@x.com", "Password": "***"}'
+```
+
 **Tips:**
 
 - Use `--interactive-only` to reduce output (only buttons, links, inputs)
 - Use `name~=` for partial matching (handles minor text changes)
 - Use `webctl query "..."` if element not found - shows suggestions
-- Check `webctl status` for console error counts before investigating
+- Check `webctl status --brief` for quick page state
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────┐     TCP/IPC      ┌─────────────┐
-│   CLI       │ ◄──────────────► │   Daemon    │
-│  (webctl)   │    JSON-RPC      │  (browser)  │
-└─────────────┘                  └─────────────┘
-      │                                 │
-      ▼                                 ▼
-  Agent/User                      Chromium + Playwright
+┌─────────────┐  Unix Socket   ┌─────────────┐
+│   CLI       │ ◄────────────► │   Daemon    │
+│  (webctl)   │   JSON-RPC     │  (browser)  │
+└─────────────┘                └─────────────┘
+      │                               │
+      ▼                               ▼
+  Agent/User                   Chromium + Playwright
 ```
 
 - **CLI**: Stateless, sends commands to daemon
 - **Daemon**: Manages browser, auto-starts on first command
+- **Socket**: `$WEBCTL_SOCKET_DIR` or OS default (see below)
 - **Profiles**: `~/.local/share/webctl/profiles/`
+
+### Socket Paths
+
+| Platform | Default |
+|----------|---------|
+| Linux | `/run/user/<uid>/webctl-<session>.sock` |
+| macOS | `/tmp/webctl-<session>.sock` |
+| Windows | `%TEMP%\webctl-<session>.sock` |
+
+Override directory with `WEBCTL_SOCKET_DIR` environment variable.
+
+---
+
+## Container Deployment
+
+Set `WEBCTL_SOCKET_DIR` to share the Unix socket between host and container (or between containers).
+
+### Daemon in Container, Client on Host
+
+```bash
+mkdir -p /tmp/webctl-ipc
+
+docker run -d --name webctl-daemon \
+  -u $(id -u):$(id -g) \
+  -v /tmp/webctl-ipc:/ipc \
+  -e WEBCTL_SOCKET_DIR=/ipc \
+  my-webctl-image python -m webctl.daemon.server
+
+export WEBCTL_SOCKET_DIR=/tmp/webctl-ipc
+webctl start && webctl navigate "https://example.com"
+```
+
+`-u $(id -u):$(id -g)` ensures the socket file is owned by your host user.
+
+### Daemon and Client in Separate Containers
+
+```bash
+docker volume create webctl-ipc
+
+docker run -d --name webctl-daemon \
+  -v webctl-ipc:/ipc \
+  -e WEBCTL_SOCKET_DIR=/ipc \
+  my-webctl-image python -m webctl.daemon.server
+
+docker run --rm \
+  -v webctl-ipc:/ipc \
+  -e WEBCTL_SOCKET_DIR=/ipc \
+  my-webctl-image webctl navigate "https://example.com"
+```
+
+No UID matching needed - both containers run as the same user.
+
+---
+
+## Security
+
+### IPC Authentication
+
+webctl verifies that CLI commands come from the same user as the daemon:
+
+| Platform | Mechanism | Strength |
+|----------|-----------|----------|
+| Linux | `SO_PEERCRED` | Kernel-enforced UID check |
+| macOS | `LOCAL_PEERCRED` | Kernel-enforced UID check |
+| Windows | `SIO_AF_UNIX_GETPEERPID` + process token | Kernel-enforced SID check |
+
+All platforms use kernel-level credential verification. This prevents other users from controlling your browser session.
+
+Note: Root/Administrator can still access any user's session (OS limitation).
 
 ---
 
