@@ -46,10 +46,8 @@ class DaemonServer:
         self._running = True
         self._last_activity = asyncio.get_running_loop().time()
 
-        # Start event emitter
         await self._event_emitter.start()
 
-        # Create transport
         self._transport = get_server_transport(self.session_id, self._handle_client)
         await self._transport.start()
 

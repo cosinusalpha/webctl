@@ -7,7 +7,6 @@ from .a11y import (
     get_a11y_snapshot_hash,
 )
 from .dom_lite import DomLiteOptions, extract_dom_lite_view
-from .export import diff_views, export_view, format_diff_summary, import_view
 from .markdown import extract_markdown_view
 from .redaction import is_sensitive_field, redact_if_sensitive, redact_secrets
 
@@ -22,8 +21,4 @@ __all__ = [
     "redact_if_sensitive",
     "redact_secrets",
     "is_sensitive_field",
-    "export_view",
-    "import_view",
-    "diff_views",
-    "format_diff_summary",
 ]

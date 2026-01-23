@@ -99,7 +99,9 @@ async def ensure_daemon(session_id: str) -> bool:
 
 async def run_command(command: str, args: dict[str, Any]) -> None:
     """Run a command against the daemon."""
-    formatter = OutputFormatter(format=_format, quiet=_quiet, result_only=_result_only, force=_force)
+    formatter = OutputFormatter(
+        format=_format, quiet=_quiet, result_only=_result_only, force=_force
+    )
 
     if not await ensure_daemon(_session):
         raise typer.Exit(1)
@@ -1520,7 +1522,10 @@ def cmd_click(
     retry: int = typer.Option(0, "--retry", "-R", help="Number of retries on failure"),
     retry_delay: int = typer.Option(1000, "--retry-delay", help="Delay between retries in ms"),
     wait_after: str | None = typer.Option(
-        None, "--wait", "-w", help="Wait condition after click (e.g., 'network-idle', 'exists:role=dialog')"
+        None,
+        "--wait",
+        "-w",
+        help="Wait condition after click (e.g., 'network-idle', 'exists:role=dialog')",
     ),
 ) -> None:
     """Click an element.
@@ -1653,7 +1658,7 @@ def cmd_upload(
 
 @app.command("fill-form")
 def cmd_fill_form(
-    fields_json: str = typer.Argument(..., help='JSON object of field:value pairs'),
+    fields_json: str = typer.Argument(..., help="JSON object of field:value pairs"),
     within: str | None = typer.Option(
         None, "--within", "-w", help="Scope to form container (e.g., 'role=form')"
     ),

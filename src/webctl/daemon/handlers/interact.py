@@ -40,6 +40,7 @@ async def with_retry(
         raise last_error
     raise RuntimeError("Retry failed with no error")
 
+
 # Aria role type from Playwright
 AriaRole = str  # Playwright uses Literal type, we use str for flexibility
 
@@ -277,7 +278,6 @@ async def handle_click(
 
         await with_retry(do_click, retry, retry_delay)
 
-        # Handle wait_after if specified
         summary: dict[str, Any] = {"clicked": {"role": role, "name": name}}
         if wait_after:
             from .wait import perform_wait
@@ -366,7 +366,6 @@ async def handle_type(
 
         await with_retry(do_type, retry, retry_delay)
 
-        # Handle wait_after if specified
         summary: dict[str, Any] = {"typed": {"role": role, "name": name, "text_length": len(text)}}
         if wait_after:
             from .wait import perform_wait
@@ -808,7 +807,6 @@ async def handle_upload(
             else page.get_by_role(cast(Any, role))
         )
 
-        # Set the file
         await locator.first.set_input_files(file_path)
 
         yield DoneResponse(
@@ -834,7 +832,6 @@ async def handle_fill_form(
     """Fill multiple form fields at once."""
     session_id = request.args.get("session", "default")
     fields = request.args.get("fields", {})
-    # within = request.args.get("within")  # TODO: implement scoped form filling
 
     if not fields:
         yield ErrorResponse(
@@ -858,8 +855,6 @@ async def handle_fill_form(
     for field_name, value in fields.items():
         try:
             if isinstance(value, bool):
-                # Handle checkbox
-                # Try to find checkbox with this name
                 try:
                     locator = page.get_by_role("checkbox", name=field_name)
                     if value:
@@ -877,7 +872,6 @@ async def handle_fill_form(
                     results.append({"field": field_name, "ok": True, "action": "checkbox"})
 
             elif isinstance(value, str):
-                # Handle text input - try multiple strategies
                 filled = False
 
                 # Strategy 1: Try by role=textbox with name
@@ -909,18 +903,22 @@ async def handle_fill_form(
                 if filled:
                     results.append({"field": field_name, "ok": True, "action": "fill"})
                 else:
-                    results.append({
-                        "field": field_name,
-                        "ok": False,
-                        "error": f"Could not find field: {field_name}",
-                    })
+                    results.append(
+                        {
+                            "field": field_name,
+                            "ok": False,
+                            "error": f"Could not find field: {field_name}",
+                        }
+                    )
 
             else:
-                results.append({
-                    "field": field_name,
-                    "ok": False,
-                    "error": f"Unsupported value type: {type(value).__name__}",
-                })
+                results.append(
+                    {
+                        "field": field_name,
+                        "ok": False,
+                        "error": f"Unsupported value type: {type(value).__name__}",
+                    }
+                )
 
         except Exception as e:
             results.append({"field": field_name, "ok": False, "error": str(e)})

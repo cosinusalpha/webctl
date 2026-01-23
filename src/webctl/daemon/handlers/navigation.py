@@ -74,7 +74,6 @@ async def handle_navigate(
         await asyncio.sleep(0.5)  # Brief wait for banners to appear
         cookie_result = await dismiss_cookie_banner(page)
 
-        # Emit navigation finished event
         await event_emitter.emit_navigation_finished(page.url, page_id)
 
         summary: dict[str, Any] = {"url": page.url, "title": await page.title()}

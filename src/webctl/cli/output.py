@@ -269,7 +269,6 @@ class OutputFormatter:
         role = data.get("role", "")
         name = data.get("name", "")
         node_id = data.get("id", "")
-        data.get("path_hint", "")
 
         # Build state indicators
         states = []
@@ -381,7 +380,6 @@ class OutputFormatter:
                 icon = "[green]►[/green]" if active else " "
                 page_id = page.get("page_id", "")
                 url = page.get("url", "")[:60]
-                page.get("kind", "tab")
                 self._console.print(f"  {icon} [cyan]{page_id}[/cyan] {url}")
         else:
             print(f"Session: {session_id} ({mode})")
@@ -491,11 +489,6 @@ def print_error(message: str) -> None:
 def print_success(message: str) -> None:
     """Print a success message."""
     console.print(f"[green]{message}[/green]")
-
-
-def print_warning(message: str) -> None:
-    """Print a warning message."""
-    console.print(f"[yellow]{message}[/yellow]")
 
 
 def print_info(message: str) -> None:

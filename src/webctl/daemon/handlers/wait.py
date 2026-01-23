@@ -142,7 +142,6 @@ async def handle_wait(
                     result = resolver.resolve(query)
                     if result.count == 0:
                         return False
-                    # Check if element is visible via Playwright
                     element = result.matches[0]
                     role = element.get("role")
                     name = element.get("name")

@@ -39,7 +39,9 @@ class A11yExtractOptions:
     # Large output handling
     grep_pattern: str | None = None  # Regex pattern to filter by role+name
     max_name_length: int | None = None  # Truncate names longer than this
-    visible_only: bool = False  # If True, filter to viewport (expensive - requires bbox lookup per element)
+    visible_only: bool = (
+        False  # If True, filter to viewport (expensive - requires bbox lookup per element)
+    )
     names_only: bool = False  # Only output role and name (no states/attributes)
     show_query: bool = False  # Include the query string to target each element
     count_only: bool = False  # Only return stats, no items

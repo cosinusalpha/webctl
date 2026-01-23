@@ -36,7 +36,9 @@ async def handle_snapshot(
     # Large output handling options
     grep_pattern = request.args.get("grep_pattern")
     max_name_length = request.args.get("max_name_length")
-    visible_only = request.args.get("visible_only", False)  # Default False - bbox check is expensive
+    visible_only = request.args.get(
+        "visible_only", False
+    )  # Default False - bbox check is expensive
     names_only = request.args.get("names_only", False)
     show_query = request.args.get("show_query", False)
     count_only = request.args.get("count_only", False)

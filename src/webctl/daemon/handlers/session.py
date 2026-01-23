@@ -20,7 +20,6 @@ async def handle_session_start(
     session_id = request.args.get("session", "default")
     mode = request.args.get("mode", "attended")
 
-    # Check if session already exists
     if session_manager.get_session(session_id):
         yield ErrorResponse(
             req_id=request.req_id,

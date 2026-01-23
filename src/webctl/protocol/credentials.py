@@ -102,18 +102,14 @@ def _get_peer_credentials_windows(sock: socket.socket) -> PeerCredentials | None
         return None
 
     # 2. Open peer process
-    proc_handle = kernel32.OpenProcess(
-        process_query_limited_information, False, peer_pid.value
-    )
+    proc_handle = kernel32.OpenProcess(process_query_limited_information, False, peer_pid.value)
     if not proc_handle:
         return None
 
     try:
         # 3. Open process token
         token_handle = wintypes.HANDLE()
-        if not advapi32.OpenProcessToken(
-            proc_handle, token_query, ctypes.byref(token_handle)
-        ):
+        if not advapi32.OpenProcessToken(proc_handle, token_query, ctypes.byref(token_handle)):
             return None
 
         try:
@@ -144,9 +140,7 @@ def _get_token_user_sid(token_handle: Any) -> Any:
 
     # First call to get buffer size
     token_info_len = wintypes.DWORD()
-    advapi32.GetTokenInformation(
-        token_handle, token_user, None, 0, ctypes.byref(token_info_len)
-    )
+    advapi32.GetTokenInformation(token_handle, token_user, None, 0, ctypes.byref(token_info_len))
 
     # Allocate buffer and get actual info
     token_info = ctypes.create_string_buffer(token_info_len.value)

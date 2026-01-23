@@ -100,7 +100,6 @@ class SessionManager:
             async with aiofiles.open(state_file) as f:
                 storage_state = json.loads(await f.read())
 
-        # Create context
         context = await browser.new_context(
             storage_state=storage_state, viewport={"width": 1280, "height": 720}
         )
@@ -120,7 +119,6 @@ class SessionManager:
             lambda page: asyncio.create_task(self._on_new_page(session, page, "popup")),
         )
 
-        # Create initial page
         page = await context.new_page()
         await self._register_page(session, page, "tab")
 
@@ -134,7 +132,6 @@ class SessionManager:
         session._page_counter += 1
         page_id = f"p{session._page_counter}"
 
-        # Create view change detector
         async def on_view_change(event: ViewChangeEvent) -> None:
             await self._event_emitter.emit_view_changed(
                 page_id=event.page_id,
