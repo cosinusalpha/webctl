@@ -83,6 +83,14 @@ def _get_peer_credentials_windows(sock: socket.socket) -> PeerCredentials | None
     kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
     advapi32 = ctypes.windll.advapi32  # type: ignore[attr-defined]
 
+    # Set up proper function signatures for correct return value handling
+    advapi32.OpenProcessToken.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
+
     # 1. Get peer PID from Unix socket
     peer_pid = wintypes.DWORD()
     bytes_returned = wintypes.DWORD()
@@ -166,6 +174,14 @@ def _get_current_user_sid() -> Any:
     token_query = 0x0008  # TOKEN_QUERY
     kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
     advapi32 = ctypes.windll.advapi32  # type: ignore[attr-defined]
+
+    # Set up proper function signatures for correct return value handling
+    advapi32.OpenProcessToken.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
 
     # Open current process token
     token_handle = wintypes.HANDLE()
