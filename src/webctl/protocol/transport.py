@@ -75,6 +75,23 @@ class StreamClientConnection(ClientConnection):
     def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         self._reader = reader
         self._writer = writer
+        self._verified = False
+
+    def verify_credentials(self) -> bool:
+        """Verify peer is same user. Call before processing commands."""
+        sock = self._writer.get_extra_info("socket")
+        if sock is None:
+            return False
+
+        from .credentials import verify_same_user
+
+        self._verified = verify_same_user(sock)
+        return self._verified
+
+    @property
+    def is_verified(self) -> bool:
+        """Whether credentials have been verified."""
+        return self._verified
 
     async def send_line(self, data: str) -> None:
         self._writer.write((data + "\n").encode())
@@ -173,6 +190,15 @@ class UnixSocketServerTransport(TransportServer):
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         connection = StreamClientConnection(reader, writer)
+
+        # Verify peer credentials before processing any commands
+        if not connection.verify_credentials():
+            import logging
+
+            logging.warning("Rejected connection: user credential mismatch")
+            await connection.close()
+            return
+
         await self._client_handler(connection)
 
     async def close(self) -> None:

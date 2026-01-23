@@ -338,6 +338,24 @@ No UID matching needed - both containers run as the same user.
 
 ---
 
+## Security
+
+### IPC Authentication
+
+webctl verifies that CLI commands come from the same user as the daemon:
+
+| Platform | Mechanism | Strength |
+|----------|-----------|----------|
+| Linux | `SO_PEERCRED` | Kernel-enforced UID check |
+| macOS | `LOCAL_PEERCRED` | Kernel-enforced UID check |
+| Windows | `SIO_AF_UNIX_GETPEERPID` + process token | Kernel-enforced SID check |
+
+All platforms use kernel-level credential verification. This prevents other users from controlling your browser session.
+
+Note: Root/Administrator can still access any user's session (OS limitation).
+
+---
+
 ## License
 
 MIT
