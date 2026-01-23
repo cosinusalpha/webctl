@@ -95,7 +95,6 @@ class TestConfig:
         """Config show displays settings."""
         result = run_webctl("config", "show")
         assert result.returncode == 0
-        assert "transport:" in result.stdout
         assert "idle_timeout:" in result.stdout
         assert "screenshot_on_error:" in result.stdout
 

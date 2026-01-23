@@ -5,6 +5,7 @@ Configuration and path management for webctl.
 import json
 import os
 import sys
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -15,11 +16,6 @@ from .security.domain_policy import PolicyConfig
 @dataclass
 class WebctlConfig:
     """Main configuration."""
-
-    # Transport
-    transport: Literal["auto", "pipe", "socket", "tcp"] = "auto"
-    tcp_host: str = "127.0.0.1"
-    tcp_port: int | None = None
 
     # Daemon
     idle_timeout: int = 900  # 15 minutes
@@ -52,10 +48,17 @@ class WebctlConfig:
         with open(path) as f:
             data = json.load(f)
 
+        # Warn about deprecated config keys
+        deprecated = [k for k in ("transport", "tcp_host", "tcp_port") if k in data]
+        if deprecated:
+            warnings.warn(
+                f"Config keys {deprecated} are deprecated and ignored. "
+                "webctl now uses Unix sockets only.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         return cls(
-            transport=data.get("transport", "auto"),
-            tcp_host=data.get("tcp_host", "127.0.0.1"),
-            tcp_port=data.get("tcp_port"),
             idle_timeout=data.get("idle_timeout", 900),
             auto_start=data.get("auto_start", True),
             default_session=data.get("default_session", "default"),
@@ -75,9 +78,6 @@ class WebctlConfig:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         data = {
-            "transport": self.transport,
-            "tcp_host": self.tcp_host,
-            "tcp_port": self.tcp_port,
             "idle_timeout": self.idle_timeout,
             "auto_start": self.auto_start,
             "default_session": self.default_session,
@@ -132,15 +132,6 @@ def get_profile_dir(session_id: str) -> Path:
 def get_base_profile_dir() -> Path:
     """Get base directory containing all session profiles."""
     return get_data_dir() / "profiles"
-
-
-def get_socket_path(session_id: str) -> Path:
-    """Get IPC socket path."""
-    if sys.platform == "win32":
-        return Path(f"\\\\.\\pipe\\webctl-{session_id}")
-    else:
-        runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
-        return runtime_dir / f"webctl-{session_id}.sock"
 
 
 def get_daemon_cmd(session_id: str) -> list[str]:

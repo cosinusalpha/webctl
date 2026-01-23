@@ -242,18 +242,70 @@ webctl stop --daemon                      # Close browser
 ## Architecture
 
 ```
-┌─────────────┐     TCP/IPC      ┌─────────────┐
-│   CLI       │ ◄──────────────► │   Daemon    │
-│  (webctl)   │    JSON-RPC      │  (browser)  │
-└─────────────┘                  └─────────────┘
-      │                                 │
-      ▼                                 ▼
-  Agent/User                      Chromium + Playwright
+┌─────────────┐  Unix Socket   ┌─────────────┐
+│   CLI       │ ◄────────────► │   Daemon    │
+│  (webctl)   │   JSON-RPC     │  (browser)  │
+└─────────────┘                └─────────────┘
+      │                               │
+      ▼                               ▼
+  Agent/User                   Chromium + Playwright
 ```
 
 - **CLI**: Stateless, sends commands to daemon
 - **Daemon**: Manages browser, auto-starts on first command
+- **Socket**: `$WEBCTL_SOCKET_DIR` or OS default (see below)
 - **Profiles**: `~/.local/share/webctl/profiles/`
+
+### Socket Paths
+
+| Platform | Default |
+|----------|---------|
+| Linux | `/run/user/<uid>/webctl-<session>.sock` |
+| macOS | `/tmp/webctl-<session>.sock` |
+| Windows | `%TEMP%\webctl-<session>.sock` |
+
+Override directory with `WEBCTL_SOCKET_DIR` environment variable.
+
+---
+
+## Container Deployment
+
+Set `WEBCTL_SOCKET_DIR` to share the Unix socket between host and container (or between containers).
+
+### Daemon in Container, Client on Host
+
+```bash
+mkdir -p /tmp/webctl-ipc
+
+docker run -d --name webctl-daemon \
+  -u $(id -u):$(id -g) \
+  -v /tmp/webctl-ipc:/ipc \
+  -e WEBCTL_SOCKET_DIR=/ipc \
+  my-webctl-image python -m webctl.daemon.server
+
+export WEBCTL_SOCKET_DIR=/tmp/webctl-ipc
+webctl start && webctl navigate "https://example.com"
+```
+
+`-u $(id -u):$(id -g)` ensures the socket file is owned by your host user.
+
+### Daemon and Client in Separate Containers
+
+```bash
+docker volume create webctl-ipc
+
+docker run -d --name webctl-daemon \
+  -v webctl-ipc:/ipc \
+  -e WEBCTL_SOCKET_DIR=/ipc \
+  my-webctl-image python -m webctl.daemon.server
+
+docker run --rm \
+  -v webctl-ipc:/ipc \
+  -e WEBCTL_SOCKET_DIR=/ipc \
+  my-webctl-image webctl navigate "https://example.com"
+```
+
+No UID matching needed - both containers run as the same user.
 
 ---
 

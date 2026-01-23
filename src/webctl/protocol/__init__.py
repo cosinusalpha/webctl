@@ -17,10 +17,11 @@ from .messages import (
     ViewChangedPayload,
 )
 from .transport import (
+    SOCKET_DIR_ENV,
     ClientConnection,
+    SocketError,
     Transport,
     TransportServer,
-    TransportType,
     get_client_transport,
     get_server_transport,
     get_socket_path,
@@ -42,7 +43,8 @@ __all__ = [
     "UserActionRequiredPayload",
     "Transport",
     "TransportServer",
-    "TransportType",
+    "SocketError",
+    "SOCKET_DIR_ENV",
     "ClientConnection",
     "get_client_transport",
     "get_server_transport",

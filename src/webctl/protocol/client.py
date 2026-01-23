@@ -15,20 +15,15 @@ from .messages import (
     Request,
     Response,
 )
-from .transport import TransportType, get_client_transport
+from .transport import get_client_transport
 
 
 class DaemonClient:
     """Client for communicating with the webctl daemon."""
 
-    def __init__(
-        self,
-        session_id: str,
-        transport_type: TransportType | None = None,
-        tcp_port: int | None = None,
-    ):
+    def __init__(self, session_id: str):
         self.session_id = session_id
-        self.transport = get_client_transport(session_id, transport_type, tcp_port)
+        self.transport = get_client_transport(session_id)
 
     async def connect(self) -> None:
         """Connect to the daemon."""

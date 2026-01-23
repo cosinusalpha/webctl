@@ -20,7 +20,7 @@ if sys.platform == "win32":
 
 from ..config import WebctlConfig, get_daemon_cmd
 from ..protocol.client import DaemonClient
-from ..protocol.transport import TransportType
+from ..protocol.transport import SocketError
 from .output import OutputFormatter, print_error, print_info, print_success
 
 app = typer.Typer(
@@ -41,16 +41,7 @@ _result_only: bool = False
 
 def get_client() -> DaemonClient:
     """Get a daemon client."""
-    config = WebctlConfig.load()
-
-    transport_type = None
-    tcp_port = None
-
-    if config.transport == "tcp" or sys.platform == "win32":
-        transport_type = TransportType.TCP
-        tcp_port = config.tcp_port
-
-    return DaemonClient(_session, transport_type, tcp_port)
+    return DaemonClient(_session)
 
 
 async def ensure_daemon(session_id: str) -> bool:
@@ -63,7 +54,7 @@ async def ensure_daemon(session_id: str) -> bool:
         await client.connect()
         await client.close()
         return True
-    except Exception:
+    except (OSError, SocketError):
         pass
 
     if not config.auto_start:
@@ -123,6 +114,9 @@ async def run_command(command: str, args: dict[str, Any]) -> None:
             if response.type == "error":
                 raise typer.Exit(1)
 
+    except SocketError as e:
+        print_error(str(e))
+        raise typer.Exit(1) from None
     except ConnectionError as e:
         print_error(f"Connection failed: {e}")
         raise typer.Exit(1) from None
@@ -1590,9 +1584,6 @@ def cmd_config_show() -> None:
     print(f"  exists: {config_path.exists()}")
     print()
     print("Settings:")
-    print(f"  transport: {config.transport}")
-    print(f"  tcp_host: {config.tcp_host}")
-    print(f"  tcp_port: {config.tcp_port or 'auto'}")
     print(f"  idle_timeout: {config.idle_timeout}s")
     print(f"  auto_start: {config.auto_start}")
     print(f"  default_session: {config.default_session}")
@@ -1613,9 +1604,6 @@ def cmd_config_get(
     config = WebctlConfig.load()
 
     valid_keys = [
-        "transport",
-        "tcp_host",
-        "tcp_port",
         "idle_timeout",
         "auto_start",
         "default_session",
@@ -1647,7 +1635,7 @@ def cmd_config_set(
 
     # Type conversion based on key
     bool_keys = ["auto_start", "a11y_include_bbox", "a11y_include_path_hint", "screenshot_on_error"]
-    int_keys = ["tcp_port", "idle_timeout"]
+    int_keys = ["idle_timeout"]
     nullable_str_keys = ["screenshot_error_dir"]
 
     typed_value: bool | int | str | None
@@ -1665,9 +1653,6 @@ def cmd_config_set(
         typed_value = value
 
     valid_keys = [
-        "transport",
-        "tcp_host",
-        "tcp_port",
         "idle_timeout",
         "auto_start",
         "default_session",
