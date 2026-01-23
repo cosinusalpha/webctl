@@ -62,6 +62,8 @@ def _get_peer_credentials_macos(sock: socket.socket) -> PeerCredentials | None:
     try:
         # struct xucred { u_int cr_version; uid_t cr_uid; short cr_ngroups; gid_t cr_groups[16]; }
         cred = sock.getsockopt(sol_local, local_peercred, 76)
+        if len(cred) < 8:
+            return None
         _version, uid = struct.unpack("Ii", cred[:8])
         gid = struct.unpack("i", cred[12:16])[0] if len(cred) >= 16 else -1
         return PeerCredentials(uid=uid, gid=gid, pid=None)
