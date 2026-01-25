@@ -36,6 +36,10 @@ class WebctlConfig:
     screenshot_on_error: bool = False
     screenshot_error_dir: str | None = None  # None = use temp dir
 
+    # Browser selection
+    browser_executable_path: str | None = None  # Override to use a custom Chromium
+    use_global_playwright: bool = False  # Allow global Playwright even if version mismatches
+
     @classmethod
     def load(cls, path: Path | None = None) -> "WebctlConfig":
         """Load configuration from file."""
@@ -68,6 +72,8 @@ class WebctlConfig:
             a11y_include_path_hint=data.get("a11y_include_path_hint", True),
             screenshot_on_error=data.get("screenshot_on_error", False),
             screenshot_error_dir=data.get("screenshot_error_dir"),
+            browser_executable_path=data.get("browser_executable_path"),
+            use_global_playwright=data.get("use_global_playwright", False),
         )
 
     def save(self, path: Path | None = None) -> None:
@@ -94,6 +100,8 @@ class WebctlConfig:
             "a11y_include_path_hint": self.a11y_include_path_hint,
             "screenshot_on_error": self.screenshot_on_error,
             "screenshot_error_dir": self.screenshot_error_dir,
+            "browser_executable_path": self.browser_executable_path,
+            "use_global_playwright": self.use_global_playwright,
         }
 
         with open(path, "w") as f:
@@ -137,6 +145,27 @@ def get_base_profile_dir() -> Path:
 def get_daemon_cmd(session_id: str) -> list[str]:
     """Get command to start daemon."""
     return [sys.executable, "-m", "webctl.daemon.server", "--session", session_id]
+
+
+def resolve_browser_settings() -> tuple[Path | None, bool]:
+    """Resolve browser selection preferences.
+
+    Priority:
+    1. WEBCTL_BROWSER_PATH environment variable
+    2. browser_executable_path from config
+    3. Default managed Playwright browser
+    """
+
+    cfg = WebctlConfig.load()
+
+    env_path = os.environ.get("WEBCTL_BROWSER_PATH")
+    if env_path:
+        return Path(env_path).expanduser(), cfg.use_global_playwright
+
+    if cfg.browser_executable_path:
+        return Path(cfg.browser_executable_path).expanduser(), cfg.use_global_playwright
+
+    return None, cfg.use_global_playwright
 
 
 # Default settings (RFC SS6, SS13)

@@ -306,7 +306,7 @@ class TestAIFeatures:
         assert "link" in output
         # Should not have heading elements (example.com has heading)
         lines = result.stdout.strip().split("\n")
-        element_lines = [l for l in lines if l.startswith("n")]
+        element_lines = [line for line in lines if line.startswith("n")]
         for line in element_lines:
             assert "link" in line.lower()
 
@@ -322,7 +322,7 @@ class TestAIFeatures:
         result = run_webctl("status", "--brief")
         assert result.returncode == 0
         # Should be one line with URL
-        lines = [l for l in result.stdout.strip().split("\n") if l]
+        lines = [line for line in result.stdout.strip().split("\n") if line]
         assert len(lines) == 1
         assert "example.com" in lines[0]
 

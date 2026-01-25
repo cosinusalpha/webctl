@@ -77,3 +77,8 @@ warn_unused_configs = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "types-aiofiles>=25.1.0.20251011",
+]

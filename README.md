@@ -127,6 +127,29 @@ playwright install-deps chromium
 
 </details>
 
+### Custom browser / global Playwright
+
+- Use a custom Chromium binary (skips managed installs):
+
+  ```bash
+  webctl config set browser_executable_path /path/to/chrome
+  # one-off override:
+  WEBCTL_BROWSER_PATH=/path/to/chrome webctl start
+  ```
+
+- Allow global Playwright even if versions mismatch (opt-in, use with care):
+
+  ```bash
+  webctl config set use_global_playwright true
+  ```
+
+- Clear overrides:
+
+  ```bash
+  webctl config set browser_executable_path null
+  webctl config set use_global_playwright false
+  ```
+
 ---
 
 ## Core Concepts
