@@ -16,8 +16,11 @@ from rich.console import Console
 
 # Fix Windows console encoding for Unicode support
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    # Only wrap if not already wrapped (avoids breaking pytest capture)
+    if hasattr(sys.stdout, "buffer") and not isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "buffer") and not isinstance(sys.stderr, io.TextIOWrapper):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 from ..config import WebctlConfig, get_daemon_cmd, resolve_browser_settings
 from ..protocol.client import DaemonClient
@@ -1903,6 +1906,12 @@ def cmd_config_show() -> None:
         f"  browser_executable_path: {config.browser_executable_path or 'unset (managed Playwright)'}"
     )
     print(f"  use_global_playwright: {config.use_global_playwright}")
+    print(f"  proxy_server: {config.proxy_server or 'unset'}")
+    print(f"  proxy_username: {config.proxy_username or 'unset'}")
+    # Mask password for security
+    proxy_password_display = "****" if config.proxy_password else "unset"
+    print(f"  proxy_password: {proxy_password_display}")
+    print(f"  proxy_bypass: {config.proxy_bypass or 'unset'}")
 
 
 @config_app.command("get")
@@ -1925,6 +1934,10 @@ def cmd_config_get(
         "screenshot_error_dir",
         "browser_executable_path",
         "use_global_playwright",
+        "proxy_server",
+        "proxy_username",
+        "proxy_password",
+        "proxy_bypass",
     ]
 
     if key not in valid_keys:
@@ -1933,7 +1946,11 @@ def cmd_config_get(
         raise typer.Exit(1)
 
     value = getattr(config, key)
-    print(value if value is not None else "null")
+    # Mask password for security
+    if key == "proxy_password" and value:
+        print("****")
+    else:
+        print(value if value is not None else "null")
 
 
 @config_app.command("set")
@@ -1955,7 +1972,14 @@ def cmd_config_set(
         "use_global_playwright",
     ]
     int_keys = ["idle_timeout"]
-    nullable_str_keys = ["screenshot_error_dir", "browser_executable_path"]
+    nullable_str_keys = [
+        "screenshot_error_dir",
+        "browser_executable_path",
+        "proxy_server",
+        "proxy_username",
+        "proxy_password",
+        "proxy_bypass",
+    ]
 
     typed_value: bool | int | str | None
     if key in bool_keys:
@@ -1985,6 +2009,10 @@ def cmd_config_set(
         "screenshot_error_dir",
         "browser_executable_path",
         "use_global_playwright",
+        "proxy_server",
+        "proxy_username",
+        "proxy_password",
+        "proxy_bypass",
     ]
 
     if key not in valid_keys:
@@ -1994,7 +2022,9 @@ def cmd_config_set(
 
     setattr(config, key, typed_value)
     config.save()
-    print_success(f"Set {key} = {typed_value}")
+    # Mask password in output for security
+    display_value = "****" if key == "proxy_password" and typed_value else typed_value
+    print_success(f"Set {key} = {display_value}")
 
 
 @config_app.command("path")

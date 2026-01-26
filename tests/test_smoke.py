@@ -98,11 +98,27 @@ class TestConfig:
         assert "idle_timeout:" in result.stdout
         assert "screenshot_on_error:" in result.stdout
 
+    def test_config_show_proxy_fields(self):
+        """Config show displays proxy settings."""
+        result = run_webctl("config", "show")
+        assert result.returncode == 0
+        assert "proxy_server:" in result.stdout
+        assert "proxy_username:" in result.stdout
+        assert "proxy_password:" in result.stdout
+        assert "proxy_bypass:" in result.stdout
+
     def test_config_get(self):
         """Config get retrieves a value."""
         result = run_webctl("config", "get", "auto_start")
         assert result.returncode == 0
         assert result.stdout.strip() in ("True", "False")
+
+    def test_config_get_proxy_server(self):
+        """Config get retrieves proxy_server."""
+        result = run_webctl("config", "get", "proxy_server")
+        assert result.returncode == 0
+        # Value is either null or a proxy URL
+        assert result.stdout.strip() in ("null",) or "http" in result.stdout
 
     def test_config_get_invalid_key(self):
         """Config get fails for invalid key."""

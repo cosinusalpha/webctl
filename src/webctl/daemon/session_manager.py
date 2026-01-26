@@ -20,7 +20,7 @@ from playwright.async_api import (
     async_playwright,
 )
 
-from ..config import get_profile_dir, resolve_browser_settings
+from ..config import get_profile_dir, resolve_browser_settings, resolve_proxy_settings
 from ..security.domain_policy import DomainPolicy
 from .detectors.action import ActionDetector
 from .detectors.auth import AuthDetector
@@ -98,6 +98,11 @@ class SessionManager:
 
         if custom_executable:
             launch_kwargs["executable_path"] = str(custom_executable)
+
+        # Add proxy configuration if available
+        proxy_config = resolve_proxy_settings()
+        if proxy_config:
+            launch_kwargs["proxy"] = proxy_config
 
         browser = await self._playwright.chromium.launch(**launch_kwargs)
 

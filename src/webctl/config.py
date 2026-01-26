@@ -8,7 +8,7 @@ import sys
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from .security.domain_policy import PolicyConfig
 
@@ -39,6 +39,12 @@ class WebctlConfig:
     # Browser selection
     browser_executable_path: str | None = None  # Override to use a custom Chromium
     use_global_playwright: bool = False  # Allow global Playwright even if version mismatches
+
+    # Proxy settings
+    proxy_server: str | None = None  # e.g., "http://proxy:8080"
+    proxy_username: str | None = None  # optional auth
+    proxy_password: str | None = None  # optional auth
+    proxy_bypass: str | None = None  # comma-separated bypass list
 
     @classmethod
     def load(cls, path: Path | None = None) -> "WebctlConfig":
@@ -74,6 +80,10 @@ class WebctlConfig:
             screenshot_error_dir=data.get("screenshot_error_dir"),
             browser_executable_path=data.get("browser_executable_path"),
             use_global_playwright=data.get("use_global_playwright", False),
+            proxy_server=data.get("proxy_server"),
+            proxy_username=data.get("proxy_username"),
+            proxy_password=data.get("proxy_password"),
+            proxy_bypass=data.get("proxy_bypass"),
         )
 
     def save(self, path: Path | None = None) -> None:
@@ -102,6 +112,10 @@ class WebctlConfig:
             "screenshot_error_dir": self.screenshot_error_dir,
             "browser_executable_path": self.browser_executable_path,
             "use_global_playwright": self.use_global_playwright,
+            "proxy_server": self.proxy_server,
+            "proxy_username": self.proxy_username,
+            "proxy_password": self.proxy_password,
+            "proxy_bypass": self.proxy_bypass,
         }
 
         with open(path, "w") as f:
@@ -166,6 +180,49 @@ def resolve_browser_settings() -> tuple[Path | None, bool]:
         return Path(cfg.browser_executable_path).expanduser(), cfg.use_global_playwright
 
     return None, cfg.use_global_playwright
+
+
+def resolve_proxy_settings() -> dict[str, Any] | None:
+    """Resolve proxy settings for Playwright.
+
+    Priority:
+    1. WEBCTL_PROXY_SERVER environment variable
+    2. HTTPS_PROXY environment variable
+    3. HTTP_PROXY environment variable
+    4. proxy_server from config file
+
+    Returns a Playwright-compatible proxy dict or None if no proxy configured.
+    """
+    cfg = WebctlConfig.load()
+
+    # Determine proxy server with priority chain
+    proxy_server = (
+        os.environ.get("WEBCTL_PROXY_SERVER")
+        or os.environ.get("HTTPS_PROXY")
+        or os.environ.get("https_proxy")
+        or os.environ.get("HTTP_PROXY")
+        or os.environ.get("http_proxy")
+        or cfg.proxy_server
+    )
+
+    if not proxy_server:
+        return None
+
+    # Build Playwright proxy config
+    proxy_config: dict[str, Any] = {"server": proxy_server}
+
+    # Add authentication if configured (only from config file)
+    if cfg.proxy_username:
+        proxy_config["username"] = cfg.proxy_username
+    if cfg.proxy_password:
+        proxy_config["password"] = cfg.proxy_password
+
+    # Add bypass list (from env var NO_PROXY or config)
+    bypass = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or cfg.proxy_bypass
+    if bypass:
+        proxy_config["bypass"] = bypass
+
+    return proxy_config
 
 
 # Default settings (RFC SS6, SS13)
