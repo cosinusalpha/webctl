@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Configurable browser selection: set `browser_executable_path` (or `WEBCTL_BROWSER_PATH`) to use a custom Chromium, and `use_global_playwright` to opt into global Playwright even when revisions mismatch.
+- Improved browser checks with explicit remediation guidance and support for skipping managed installs when a custom executable is provided.
+
+### Changed
+
+- Browser setup, doctor, and start now honor custom/global selections and surface clearer version-mismatch warnings and fix commands.
+
 ## [0.3.0] - 2026-01-23
 
 ### Added

@@ -16,11 +16,8 @@ from webctl.protocol.credentials import (
 
 def _create_unix_socket_pair_windows():
     """Create a connected Unix socket pair on Windows using ctypes."""
-    import ctypes
-    from ctypes import wintypes
-
     # Import to get the monkey-patched AF_UNIX
-    from webctl.protocol.transport import _win_bind_unix, _win_connect_unix, _win_accept_unix
+    from webctl.protocol.transport import _win_accept_unix, _win_bind_unix, _win_connect_unix
 
     sock_path = os.path.join(tempfile.gettempdir(), f"test-creds-{os.getpid()}.sock")
     if os.path.exists(sock_path):

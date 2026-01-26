@@ -19,7 +19,7 @@ webctl snapshot --interactive-only
 
 ## Why CLI Instead of MCP?
 
-MCP browser tools have a fundamental problem: **the server controls what enters your context**. With Playwright MCP, every response includes the full accessibility tree plus console messages. After a few page queries, your context window is full.
+MCP browser tools have a fundamental problem: **the server controls what enters your context**. With Playwright MCP, every response includes the full accessibility tree plus console messages. After a few page queries, your context window is full. This leads to degraded performance, lost context, and higher costs.
 
 CLI flips this around: **you control what enters context**.
 
@@ -234,11 +234,91 @@ Override directory with `WEBCTL_SOCKET_DIR` environment variable.
 
 ---
 
-## Container Deployment
+## Security
+
+### IPC Authentication
+
+webctl verifies that CLI commands come from the same user as the daemon:
+
+| Platform | Mechanism | Strength |
+|----------|-----------|----------|
+| Linux | `SO_PEERCRED` | Kernel-enforced UID check |
+| macOS | `LOCAL_PEERCRED` | Kernel-enforced UID check |
+| Windows | `SIO_AF_UNIX_GETPEERPID` + process token | Kernel-enforced SID check |
+
+All platforms use kernel-level credential verification. This prevents other users from controlling your browser session.
+
+Note: Root/Administrator can still access any user's session (OS limitation).
+
+---
+
+## Advanced Configuration
+
+### Custom Browser
+
+Use a custom Chromium binary (skips managed installs):
+
+```bash
+webctl config set browser_executable_path /path/to/chrome
+
+# One-off override via environment:
+WEBCTL_BROWSER_PATH=/path/to/chrome webctl start
+```
+
+Allow global Playwright even if versions mismatch (opt-in, use with care):
+
+```bash
+webctl config set use_global_playwright true
+```
+
+Clear overrides:
+
+```bash
+webctl config set browser_executable_path null
+webctl config set use_global_playwright false
+```
+
+### Proxy Configuration
+
+Configure HTTP/HTTPS proxy for corporate networks or CI environments.
+
+**Via environment variables** (recommended for CI):
+
+```bash
+# Standard proxy env vars (auto-detected)
+export HTTPS_PROXY=http://proxy.corp.com:8080
+export NO_PROXY=localhost,*.internal.com
+webctl start
+
+# Or use webctl-specific var (highest priority)
+export WEBCTL_PROXY_SERVER=http://proxy.corp.com:8080
+```
+
+**Via config file** (persistent):
+
+```bash
+webctl config set proxy_server http://proxy.corp.com:8080
+webctl config set proxy_bypass localhost,*.internal.com
+
+# For authenticated proxies
+webctl config set proxy_username myuser
+webctl config set proxy_password mypass
+```
+
+**Priority order**: `WEBCTL_PROXY_SERVER` > `HTTPS_PROXY` > `HTTP_PROXY` > config file
+
+Check and clear settings:
+
+```bash
+webctl config show              # View all settings
+webctl config set proxy_server null   # Clear proxy
+```
+
+### Container Deployment
 
 Set `WEBCTL_SOCKET_DIR` to share the Unix socket between host and container (or between containers).
 
-### Daemon in Container, Client on Host
+**Daemon in Container, Client on Host:**
 
 ```bash
 mkdir -p /tmp/webctl-ipc
@@ -255,7 +335,7 @@ webctl start && webctl navigate "https://example.com"
 
 `-u $(id -u):$(id -g)` ensures the socket file is owned by your host user.
 
-### Daemon and Client in Separate Containers
+**Daemon and Client in Separate Containers:**
 
 ```bash
 docker volume create webctl-ipc
@@ -272,24 +352,6 @@ docker run --rm \
 ```
 
 No UID matching needed - both containers run as the same user.
-
----
-
-## Security
-
-### IPC Authentication
-
-webctl verifies that CLI commands come from the same user as the daemon:
-
-| Platform | Mechanism | Strength |
-|----------|-----------|----------|
-| Linux | `SO_PEERCRED` | Kernel-enforced UID check |
-| macOS | `LOCAL_PEERCRED` | Kernel-enforced UID check |
-| Windows | `SIO_AF_UNIX_GETPEERPID` + process token | Kernel-enforced SID check |
-
-All platforms use kernel-level credential verification. This prevents other users from controlling your browser session.
-
-Note: Root/Administrator can still access any user's session (OS limitation).
 
 ---
 

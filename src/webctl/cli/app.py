@@ -4,6 +4,7 @@ Main CLI application for webctl.
 
 import asyncio
 import io
+import os
 import subprocess
 import sys
 import time
@@ -15,10 +16,13 @@ from rich.console import Console
 
 # Fix Windows console encoding for Unicode support
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    # Only wrap if not already wrapped (avoids breaking pytest capture)
+    if hasattr(sys.stdout, "buffer") and not isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "buffer") and not isinstance(sys.stderr, io.TextIOWrapper):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-from ..config import WebctlConfig, get_daemon_cmd
+from ..config import WebctlConfig, get_daemon_cmd, resolve_browser_settings
 from ..protocol.client import DaemonClient
 from ..protocol.transport import SocketError
 from .output import OutputFormatter, print_error, print_info, print_success
@@ -158,46 +162,119 @@ def main(
 # === Setup and Diagnostics ===
 
 
-def check_playwright_browser() -> tuple[bool, str]:
-    """Check if Playwright Chromium browser is installed."""
+def _playwright_browsers_dir() -> Path:
+    """Location where Playwright stores browsers (mirrors Playwright defaults)."""
+
+    env_path = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if env_path:
+        return Path(env_path).expanduser()
+
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "ms-playwright"
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        return base / "ms-playwright"
+
+    # Linux / other Unix
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "ms-playwright"
+
+
+def _expected_chromium_revision() -> str | None:
+    """Return the Chromium revision Playwright expects (best-effort)."""
+
     try:
-        # Verify playwright is importable
-        from playwright._impl._driver import compute_driver_executable
+        from playwright._repo_version import chromium  # type: ignore[attr-defined]
 
-        compute_driver_executable()  # Raises if playwright not properly installed
+        return str(chromium)
+    except Exception:
+        return None
 
-        # Run playwright to check browser status
-        result = subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "--dry-run", "chromium"],
-            capture_output=True,
-            text=True,
-            timeout=30,
+
+def _installed_chromium_revisions() -> list[tuple[str, Path]]:
+    """List installed Chromium revisions as (revision, path)."""
+
+    base = _playwright_browsers_dir()
+    if not base.exists():
+        return []
+
+    installs: list[tuple[str, Path]] = []
+    for candidate in base.glob("chromium-*"):
+        if candidate.is_dir():
+            revision = candidate.name.split("chromium-")[-1]
+            installs.append((revision, candidate))
+
+    installs.sort(key=lambda item: int(item[0]) if item[0].isdigit() else item[0])
+    return installs
+
+
+def check_playwright_browser(
+    custom_executable: Path | None = None, allow_global: bool = False
+) -> tuple[bool, str, list[str]]:
+    """Check if a usable browser is available.
+
+    Returns (ok, message, remediation_steps).
+    """
+
+    if custom_executable:
+        if not custom_executable.exists():
+            fixes = [
+                "Set a valid path via: webctl config set browser_executable_path /path/to/chrome",
+                "Or clear the override: webctl config set browser_executable_path null",
+            ]
+            return False, f"Custom browser not found: {custom_executable}", fixes
+
+        return True, f"Using custom browser at {custom_executable}", []
+
+    expected_rev = _expected_chromium_revision()
+    installed = _installed_chromium_revisions()
+    installed_revs = [rev for rev, _ in installed]
+    found_rev = installed_revs[-1] if installed_revs else None
+    browsers_dir = _playwright_browsers_dir()
+
+    if expected_rev and expected_rev in installed_revs:
+        return True, f"Chromium browser is installed (rev {expected_rev})", []
+
+    if allow_global and found_rev:
+        msg = (
+            f"Using global Playwright browser rev {found_rev} (expected {expected_rev or 'unknown'}) "
+            "because use_global_playwright is enabled"
         )
+        return True, msg, []
 
-        # If dry-run succeeds without mentioning "will download", browser is installed
-        if "will download" in result.stdout.lower() or result.returncode != 0:
-            return False, "Chromium browser not installed"
+    fixes = ["Run: webctl setup --force"]
+    fixes.append(
+        "Or allow global Playwright (version-mismatch OK): webctl config set use_global_playwright true"
+    )
 
-        return True, "Chromium browser is installed"
+    if expected_rev and found_rev:
+        msg = (
+            f"Chromium browser mismatch: expected rev {expected_rev}, found {', '.join(installed_revs)} "
+            f"in {browsers_dir}"
+        )
+    elif expected_rev:
+        msg = f"Chromium browser missing: expected rev {expected_rev} in {browsers_dir}"
+    elif found_rev:
+        msg = f"Chromium browser installed at {found_rev} but expected revision is unknown"
+    else:
+        msg = "Chromium browser not installed"
 
-    except Exception as e:
-        # Fallback: try to actually check if chromium executable exists
-        try:
-            result = subprocess.run(
-                [sys.executable, "-m", "playwright", "install", "--help"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                return False, f"Could not verify browser installation: {e}"
-        except Exception:
-            pass
-        return False, f"Playwright not properly installed: {e}"
+    return False, msg, fixes
 
 
-def install_playwright_browser() -> bool:
+def _print_fix_list(fixes: list[str]) -> None:
+    """Pretty-print remediation steps."""
+
+    for fix in fixes:
+        console.print(f"  • {fix}")
+
+
+def install_playwright_browser(custom_executable: Path | None = None) -> bool:
     """Install Playwright Chromium browser."""
+
+    if custom_executable:
+        print_info("Custom browser configured; skipping Playwright-managed install.")
+        return True
+
     print_info("Installing Chromium browser (this may take a few minutes)...")
 
     try:
@@ -256,8 +333,10 @@ def cmd_setup(
     console.print("[bold]webctl setup[/bold]")
     console.print()
 
+    custom_path, allow_global = resolve_browser_settings()
+
     # Check current status
-    browser_ok, browser_msg = check_playwright_browser()
+    browser_ok, browser_msg, fixes = check_playwright_browser(custom_path, allow_global)
 
     if browser_ok and not force:
         print_success(f"✓ {browser_msg}")
@@ -266,6 +345,20 @@ def cmd_setup(
 
     if not browser_ok:
         console.print(f"[yellow]![/yellow] {browser_msg}")
+        if fixes:
+            console.print("  Fix options:")
+            _print_fix_list(fixes)
+        if custom_path:
+            # Install cannot fix a bad custom path
+            raise typer.Exit(1)
+
+    if custom_path:
+        console.print()
+        console.print(
+            "[bold]Custom browser configured; skipping Playwright-managed install.[/bold]"
+        )
+        print_success("webctl is ready to use!")
+        return
 
     # Install system deps first on Linux
     if sys.platform == "linux":
@@ -279,7 +372,7 @@ def cmd_setup(
     console.print()
     console.print("[bold]Installing Chromium browser...[/bold]")
 
-    if install_playwright_browser():
+    if install_playwright_browser(custom_path):
         print_success("✓ Chromium browser installed successfully")
         console.print()
         print_success("webctl is ready to use!")
@@ -332,12 +425,17 @@ def cmd_doctor() -> None:
         issues.append("Run: pip install playwright")
 
     # Browser
-    browser_ok, browser_msg = check_playwright_browser()
+    custom_path, allow_global = resolve_browser_settings()
+    browser_ok, browser_msg, fixes = check_playwright_browser(custom_path, allow_global)
     if browser_ok:
         console.print(f"[green]✓[/green] {browser_msg}")
     else:
         console.print(f"[red]✗[/red] {browser_msg}")
-        issues.append("Run: webctl setup")
+        if fixes:
+            _print_fix_list(fixes)
+            issues.extend(fixes)
+        else:
+            issues.append("Run: webctl setup")
 
     # Config
     from ..config import get_config_dir, get_data_dir
@@ -1286,16 +1384,25 @@ def cmd_start(
     ),
 ) -> None:
     """Start a browser session."""
+    custom_path, allow_global = resolve_browser_settings()
+
     # Check if browser is installed
     if auto_setup:
-        browser_ok, browser_msg = check_playwright_browser()
+        browser_ok, browser_msg, fixes = check_playwright_browser(custom_path, allow_global)
         if not browser_ok:
             console.print(f"[yellow]Browser not ready:[/yellow] {browser_msg}")
+            if fixes:
+                _print_fix_list(fixes)
             console.print()
+
+            if custom_path:
+                # Installing won't fix an invalid custom path
+                raise typer.Exit(1)
+
             console.print("Running automatic setup...")
             console.print()
 
-            if install_playwright_browser():
+            if install_playwright_browser(custom_path):
                 print_success("Browser installed! Starting session...")
                 console.print()
             else:
@@ -1795,6 +1902,16 @@ def cmd_config_show() -> None:
     print(f"  a11y_include_path_hint: {config.a11y_include_path_hint}")
     print(f"  screenshot_on_error: {config.screenshot_on_error}")
     print(f"  screenshot_error_dir: {config.screenshot_error_dir or 'temp'}")
+    print(
+        f"  browser_executable_path: {config.browser_executable_path or 'unset (managed Playwright)'}"
+    )
+    print(f"  use_global_playwright: {config.use_global_playwright}")
+    print(f"  proxy_server: {config.proxy_server or 'unset'}")
+    print(f"  proxy_username: {config.proxy_username or 'unset'}")
+    # Mask password for security
+    proxy_password_display = "****" if config.proxy_password else "unset"
+    print(f"  proxy_password: {proxy_password_display}")
+    print(f"  proxy_bypass: {config.proxy_bypass or 'unset'}")
 
 
 @config_app.command("get")
@@ -1815,6 +1932,12 @@ def cmd_config_get(
         "a11y_include_path_hint",
         "screenshot_on_error",
         "screenshot_error_dir",
+        "browser_executable_path",
+        "use_global_playwright",
+        "proxy_server",
+        "proxy_username",
+        "proxy_password",
+        "proxy_bypass",
     ]
 
     if key not in valid_keys:
@@ -1823,7 +1946,11 @@ def cmd_config_get(
         raise typer.Exit(1)
 
     value = getattr(config, key)
-    print(value if value is not None else "null")
+    # Mask password for security
+    if key == "proxy_password" and value:
+        print("****")
+    else:
+        print(value if value is not None else "null")
 
 
 @config_app.command("set")
@@ -1837,9 +1964,22 @@ def cmd_config_set(
     config = WebctlConfig.load()
 
     # Type conversion based on key
-    bool_keys = ["auto_start", "a11y_include_bbox", "a11y_include_path_hint", "screenshot_on_error"]
+    bool_keys = [
+        "auto_start",
+        "a11y_include_bbox",
+        "a11y_include_path_hint",
+        "screenshot_on_error",
+        "use_global_playwright",
+    ]
     int_keys = ["idle_timeout"]
-    nullable_str_keys = ["screenshot_error_dir"]
+    nullable_str_keys = [
+        "screenshot_error_dir",
+        "browser_executable_path",
+        "proxy_server",
+        "proxy_username",
+        "proxy_password",
+        "proxy_bypass",
+    ]
 
     typed_value: bool | int | str | None
     if key in bool_keys:
@@ -1855,6 +1995,9 @@ def cmd_config_set(
     else:
         typed_value = value
 
+    if key == "browser_executable_path" and typed_value:
+        typed_value = str(Path(str(typed_value)).expanduser())
+
     valid_keys = [
         "idle_timeout",
         "auto_start",
@@ -1864,6 +2007,12 @@ def cmd_config_set(
         "a11y_include_path_hint",
         "screenshot_on_error",
         "screenshot_error_dir",
+        "browser_executable_path",
+        "use_global_playwright",
+        "proxy_server",
+        "proxy_username",
+        "proxy_password",
+        "proxy_bypass",
     ]
 
     if key not in valid_keys:
@@ -1873,7 +2022,9 @@ def cmd_config_set(
 
     setattr(config, key, typed_value)
     config.save()
-    print_success(f"Set {key} = {typed_value}")
+    # Mask password in output for security
+    display_value = "****" if key == "proxy_password" and typed_value else typed_value
+    print_success(f"Set {key} = {display_value}")
 
 
 @config_app.command("path")

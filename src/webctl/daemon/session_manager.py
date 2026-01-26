@@ -20,7 +20,7 @@ from playwright.async_api import (
     async_playwright,
 )
 
-from ..config import get_profile_dir
+from ..config import get_profile_dir, resolve_browser_settings, resolve_proxy_settings
 from ..security.domain_policy import DomainPolicy
 from .detectors.action import ActionDetector
 from .detectors.auth import AuthDetector
@@ -84,14 +84,27 @@ class SessionManager:
         await self._ensure_playwright()
         assert self._playwright is not None
 
+        custom_executable, _allow_global = resolve_browser_settings()
+
         profile_dir = profile_dir or get_profile_dir(session_id)
         profile_dir.mkdir(parents=True, exist_ok=True)
 
         # Launch browser
         headless = mode == "unattended"
-        browser = await self._playwright.chromium.launch(
-            headless=headless, args=["--disable-blink-features=AutomationControlled"]
-        )
+        launch_kwargs: dict[str, Any] = {
+            "headless": headless,
+            "args": ["--disable-blink-features=AutomationControlled"],
+        }
+
+        if custom_executable:
+            launch_kwargs["executable_path"] = str(custom_executable)
+
+        # Add proxy configuration if available
+        proxy_config = resolve_proxy_settings()
+        if proxy_config:
+            launch_kwargs["proxy"] = proxy_config
+
+        browser = await self._playwright.chromium.launch(**launch_kwargs)
 
         # Load saved state if exists
         state_file = profile_dir / "state.json"
