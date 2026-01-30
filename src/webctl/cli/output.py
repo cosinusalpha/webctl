@@ -261,6 +261,8 @@ class OutputFormatter:
             self._output_profile(item_data)
         elif view == "status":
             self._output_status(item_data)
+        elif view == "inspect":
+            self._output_inspect(item_data)
         else:
             self._output_jsonl(data)
 
@@ -403,6 +405,102 @@ class OutputFormatter:
             )
         else:
             print(f"{url} | {element_count} elements | {error_count} errors | {state}")
+
+    def _output_inspect(self, data: dict[str, Any]) -> None:
+        """Output element inspection results."""
+        node_id = data.get("id", "")
+        role = data.get("role", "unknown")
+        name = data.get("name", "")
+        resolved_by = data.get("resolved_by", "aria")
+
+        if self.color:
+            self._console.print(f"[bold]Element: {node_id}[/bold]")
+            self._console.print(f"  role: [cyan]{role}[/cyan]")
+            self._console.print(f"  name: [white]{name}[/white]")
+            self._console.print(f"  resolved_by: [yellow]{resolved_by}[/yellow]")
+            self._console.print()
+
+            # HTML attributes
+            self._console.print("[bold]HTML Attributes:[/bold]")
+            attrs = ["aria-label", "title", "placeholder", "class", "id_attr", "data-testid"]
+            for attr in attrs:
+                val = data.get(attr)
+                if val:
+                    display_attr = "id" if attr == "id_attr" else attr
+                    self._console.print(f"  {display_attr}: [dim]{val}[/dim]")
+
+            # State
+            self._console.print()
+            self._console.print("[bold]State:[/bold]")
+            for key in ["visible", "enabled", "editable", "checked"]:
+                val = data.get(key)
+                if val is not None:
+                    color = "green" if val else "red"
+                    self._console.print(f"  {key}: [{color}]{val}[/{color}]")
+
+            # Bounding box
+            bbox = data.get("bbox")
+            if bbox:
+                self._console.print()
+                self._console.print("[bold]Bounding Box:[/bold]")
+                self._console.print(
+                    f"  x={bbox.get('x')}, y={bbox.get('y')}, "
+                    f"w={bbox.get('width')}, h={bbox.get('height')}"
+                )
+
+            # Inner text
+            inner_text = data.get("inner_text")
+            if inner_text:
+                self._console.print()
+                self._console.print("[bold]Inner Text:[/bold]")
+                self._console.print(f"  [dim]{inner_text}[/dim]")
+
+            # Note/warning
+            note = data.get("note")
+            if note:
+                self._console.print()
+                self._console.print(f"[yellow]Note:[/yellow] {note}")
+        else:
+            print(f"Element: {node_id}")
+            print(f"  role: {role}")
+            print(f"  name: {name}")
+            print(f"  resolved_by: {resolved_by}")
+            print()
+
+            print("HTML Attributes:")
+            attrs = ["aria-label", "title", "placeholder", "class", "id_attr", "data-testid"]
+            for attr in attrs:
+                val = data.get(attr)
+                if val:
+                    display_attr = "id" if attr == "id_attr" else attr
+                    print(f"  {display_attr}: {val}")
+
+            print()
+            print("State:")
+            for key in ["visible", "enabled", "editable", "checked"]:
+                val = data.get(key)
+                if val is not None:
+                    print(f"  {key}: {val}")
+
+            bbox = data.get("bbox")
+            if bbox:
+                print()
+                print("Bounding Box:")
+                print(
+                    f"  x={bbox.get('x')}, y={bbox.get('y')}, "
+                    f"w={bbox.get('width')}, h={bbox.get('height')}"
+                )
+
+            inner_text = data.get("inner_text")
+            if inner_text:
+                print()
+                print("Inner Text:")
+                print(f"  {inner_text}")
+
+            note = data.get("note")
+            if note:
+                print()
+                print(f"Note: {note}")
 
     def _output_event(self, data: dict[str, Any]) -> None:
         """Output an event."""

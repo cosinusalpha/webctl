@@ -333,3 +333,163 @@ async def handle_query(
         },
     )
     yield DoneResponse(req_id=request.req_id, ok=True)
+
+
+@register("inspect")
+async def handle_inspect(
+    request: Request, session_manager: SessionManager, **kwargs: Any
+) -> AsyncIterator[Response]:
+    """Inspect an element's full attributes for debugging."""
+    from typing import cast
+
+    from .interact import resolve_with_fallback, ResolveError
+
+    session_id = request.args.get("session", "default")
+    query_str = request.args.get("query", "")
+
+    if not query_str:
+        yield ErrorResponse(
+            req_id=request.req_id,
+            error="Missing 'query' argument",
+            code="missing_argument",
+        )
+        return
+
+    page = session_manager.get_active_page(session_id)
+    if not page:
+        yield ErrorResponse(
+            req_id=request.req_id,
+            error="No active page",
+            code="no_active_page",
+        )
+        return
+
+    try:
+        result = await resolve_with_fallback(page, query_str)
+        if isinstance(result, ResolveError):
+            yield ErrorResponse(
+                req_id=request.req_id,
+                error=result.message,
+                code=result.code,
+                details={
+                    "suggestions": result.suggestions,
+                    "similar_elements": result.similar_elements,
+                },
+            )
+            return
+
+        element = result.element
+
+        # Use pre-built locator from fallback, or build from role/name
+        if "_locator" in element:
+            locator = element["_locator"]
+        else:
+            role = element.get("role")
+            name = element.get("name")
+            locator = (
+                page.get_by_role(cast(Any, role), name=name)
+                if name
+                else page.get_by_role(cast(Any, role))
+            )
+
+        # Get the first matching element
+        el = locator.first
+
+        # Fetch all attributes
+        info: dict[str, Any] = {
+            "id": element.get("id"),
+            "role": element.get("role", "unknown"),
+            "name": element.get("name", ""),
+            "resolved_by": result.method,
+        }
+
+        # Fetch HTML attributes
+        try:
+            info["aria-label"] = await el.get_attribute("aria-label")
+        except Exception:
+            info["aria-label"] = None
+
+        try:
+            info["title"] = await el.get_attribute("title")
+        except Exception:
+            info["title"] = None
+
+        try:
+            info["placeholder"] = await el.get_attribute("placeholder")
+        except Exception:
+            info["placeholder"] = None
+
+        try:
+            info["class"] = await el.get_attribute("class")
+        except Exception:
+            info["class"] = None
+
+        try:
+            info["id_attr"] = await el.get_attribute("id")
+        except Exception:
+            info["id_attr"] = None
+
+        try:
+            info["data-testid"] = await el.get_attribute("data-testid")
+        except Exception:
+            info["data-testid"] = None
+
+        # Fetch state
+        try:
+            info["visible"] = await el.is_visible()
+        except Exception:
+            info["visible"] = None
+
+        try:
+            info["enabled"] = await el.is_enabled()
+        except Exception:
+            info["enabled"] = None
+
+        try:
+            info["editable"] = await el.is_editable()
+        except Exception:
+            info["editable"] = None
+
+        try:
+            info["checked"] = await el.is_checked()
+        except Exception:
+            info["checked"] = None
+
+        # Get bounding box
+        try:
+            bbox = await el.bounding_box()
+            if bbox:
+                info["bbox"] = {
+                    "x": round(bbox["x"], 1),
+                    "y": round(bbox["y"], 1),
+                    "width": round(bbox["width"], 1),
+                    "height": round(bbox["height"], 1),
+                }
+        except Exception:
+            info["bbox"] = None
+
+        # Get inner text (truncated)
+        try:
+            text = await el.inner_text()
+            if text:
+                info["inner_text"] = text[:200] + ("..." if len(text) > 200 else "")
+        except Exception:
+            info["inner_text"] = None
+
+        # Add warning if present
+        if result.warning:
+            info["note"] = result.warning
+
+        yield ItemResponse(
+            req_id=request.req_id,
+            view="inspect",
+            data=info,
+        )
+        yield DoneResponse(req_id=request.req_id, ok=True)
+
+    except Exception as e:
+        yield ErrorResponse(
+            req_id=request.req_id,
+            error=f"Inspect failed: {e}",
+            code="inspect_failed",
+        )
