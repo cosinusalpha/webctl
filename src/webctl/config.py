@@ -46,6 +46,10 @@ class WebctlConfig:
     proxy_password: str | None = None  # optional auth
     proxy_bypass: str | None = None  # comma-separated bypass list
 
+    # Adblock settings
+    adblock_enabled: bool = True  # Enable adblock filtering
+    adblock_lists: list[str] | None = None  # None = use default lists
+
     @classmethod
     def load(cls, path: Path | None = None) -> "WebctlConfig":
         """Load configuration from file."""
@@ -84,6 +88,8 @@ class WebctlConfig:
             proxy_username=data.get("proxy_username"),
             proxy_password=data.get("proxy_password"),
             proxy_bypass=data.get("proxy_bypass"),
+            adblock_enabled=data.get("adblock_enabled", True),
+            adblock_lists=data.get("adblock_lists"),
         )
 
     def save(self, path: Path | None = None) -> None:
@@ -116,6 +122,8 @@ class WebctlConfig:
             "proxy_username": self.proxy_username,
             "proxy_password": self.proxy_password,
             "proxy_bypass": self.proxy_bypass,
+            "adblock_enabled": self.adblock_enabled,
+            "adblock_lists": self.adblock_lists,
         }
 
         with open(path, "w") as f:
@@ -223,6 +231,27 @@ def resolve_proxy_settings() -> dict[str, Any] | None:
         proxy_config["bypass"] = bypass
 
     return proxy_config
+
+
+def resolve_adblock_settings() -> tuple[bool, list[str] | None]:
+    """Resolve adblock settings.
+
+    Priority:
+    1. WEBCTL_ADBLOCK_ENABLED environment variable (0/1/true/false)
+    2. adblock_enabled from config file
+
+    Returns (enabled, list_names) tuple.
+    """
+    cfg = WebctlConfig.load()
+
+    # Check environment variable
+    env_enabled = os.environ.get("WEBCTL_ADBLOCK_ENABLED")
+    if env_enabled is not None:
+        enabled = env_enabled.lower() in ("1", "true", "yes")
+    else:
+        enabled = cfg.adblock_enabled
+
+    return enabled, cfg.adblock_lists
 
 
 # Default settings (RFC SS6, SS13)
