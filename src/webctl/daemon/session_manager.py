@@ -20,8 +20,14 @@ from playwright.async_api import (
     async_playwright,
 )
 
-from ..config import get_profile_dir, resolve_browser_settings, resolve_proxy_settings
+from ..config import (
+    get_profile_dir,
+    resolve_adblock_settings,
+    resolve_browser_settings,
+    resolve_proxy_settings,
+)
 from ..security.domain_policy import DomainPolicy
+from .adblock import get_adblock_engine
 from .detectors.action import ActionDetector
 from .detectors.auth import AuthDetector
 from .detectors.cookie_banner import CookieBannerDismisser
@@ -54,6 +60,7 @@ class SessionState:
     pages: dict[str, PageInfo] = field(default_factory=dict)
     active_page_id: str | None = None
     auto_dismiss_cookies: bool = True  # Auto-dismiss cookie banners
+    adblock_enabled: bool = True  # Enable adblock filtering
     _page_counter: int = 0
     _dismissed_domains: set[str] = field(default_factory=set)  # Track domains where we dismissed
 
@@ -117,6 +124,9 @@ class SessionManager:
             storage_state=storage_state, viewport={"width": 1280, "height": 720}
         )
 
+        # Resolve adblock settings
+        adblock_enabled, _adblock_lists = resolve_adblock_settings()
+
         session = SessionState(
             session_id=session_id,
             mode=mode,
@@ -124,6 +134,7 @@ class SessionManager:
             domain_policy=domain_policy,
             browser=browser,
             context=context,
+            adblock_enabled=adblock_enabled,
         )
 
         # Setup popup handler
@@ -186,6 +197,14 @@ class SessionManager:
 
         # Start view change monitoring
         await view_detector.start()
+
+        # Setup adblock filtering if enabled
+        if session.adblock_enabled:
+            try:
+                adblock = await get_adblock_engine()
+                await adblock.setup_page(page)
+            except Exception:
+                pass  # Don't fail page registration if adblock setup fails
 
         # Emit page.opened event
         await self._event_emitter.emit_page_opened(page_id, page.url, kind)

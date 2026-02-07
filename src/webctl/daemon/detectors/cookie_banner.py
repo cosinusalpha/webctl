@@ -3,14 +3,22 @@ Cookie consent banner detector and auto-dismisser.
 
 Automatically detects and dismisses cookie consent banners to prevent them
 from blocking page interactions.
+
+Uses Consent-O-Matic rules as the primary detection method, with fallback
+to generic patterns.
 """
 
 import asyncio
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
 
 from playwright.async_api import Page
+
+from .consent_o_matic import ConsentOMaticEngine
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -112,6 +120,7 @@ class CookieBannerDismisser:
     def __init__(self) -> None:
         self._accept_patterns = [re.compile(p, re.I) for p in ACCEPT_BUTTON_PATTERNS]
         self._banner_patterns = [re.compile(p, re.I) for p in BANNER_CONTAINER_PATTERNS]
+        self._consent_o_matic = ConsentOMaticEngine()
 
     async def detect_and_dismiss(self, page: Page) -> CookieBannerResult:
         """
@@ -121,7 +130,28 @@ class CookieBannerDismisser:
         """
         details: dict[str, Any] = {}
 
-        # Strategy 1: Find and click accept button via a11y tree
+        # Strategy 0: Consent-O-Matic rules (PRIMARY - 44+ CMPs supported)
+        try:
+            result = await self._consent_o_matic.detect_and_handle(page)
+            if result.handled:
+                return CookieBannerResult(
+                    detected=True,
+                    dismissed=True,
+                    method="consent_o_matic",
+                    details={
+                        "cmp": result.cmp_name,
+                        "methods": result.methods_executed,
+                    },
+                )
+            elif result.cmp_name:
+                # CMP detected but couldn't handle it
+                details["consent_o_matic_cmp"] = result.cmp_name
+                details["consent_o_matic_error"] = result.error
+        except Exception as e:
+            logger.debug("Consent-O-Matic failed: %s", e)
+            details["consent_o_matic_error"] = str(e)
+
+        # Strategy 1: Find and click accept button via a11y tree (FALLBACK)
         try:
             snapshot_str = await page.locator("body").aria_snapshot()
             if snapshot_str:

@@ -463,10 +463,11 @@ Start: `webctl start` | End: `webctl stop --daemon`
 - `webctl snapshot --count` - Just element counts (zero context)
 - `webctl snapshot --interactive-only` - See clickable elements
 - `webctl snapshot --show-query` - Show query for each element
-- `webctl click 'role=button name~="Text"'` - Click
+- `webctl click 'role=button name~="Text"'` - Click (first match if multiple)
 - `webctl click '...' --retry 3 --wait network-idle` - Reliable click
 - `webctl type 'role=textbox name~="Field"' "value" --submit` - Type + Enter
 - `webctl fill-form '{"Email": "x@y.com", "Password": "***"}'` - Bulk fill
+- `webctl inspect id=n74` - Debug element attributes
 - `webctl status --brief` - Quick page state check
 
 ## Query Syntax
@@ -474,10 +475,15 @@ Quote: `'role=button name~="Text"'` (single outside, double for name)
 - `name~="text"` - Contains (PREFERRED)
 - `name="text"` - Exact match (brittle)
 
+## Smart Defaults
+- Multiple matches? Clicks first, warns you (summary shows note)
+- Element not found by name? Auto-tries title attribute, visible text
+- Element off-screen? Auto-scrolls before clicking
+
 ## Reduce Output
 - `--count` - Just counts (zero context cost)
 - `--interactive-only` - Only buttons/links/inputs
-- `--grep "pattern"` - Filter by regex
+- `--filter "pattern"` - Filter by regex
 - `--within "role=main"` - Scope to area
 
 Run `webctl --help` for more.
@@ -503,7 +509,9 @@ CLI tool for browser automation. Use this instead of MCP browser tools - it give
 4. **ALWAYS use `--interactive-only`** with snapshot (unless you need to read page text)
 5. **ALWAYS use `name~="text"`** not `name="text"` (see "Why name~=" below)
 6. **ALWAYS quote queries:** `'role=button name~="Submit"'`
-7. **Output is compact by default** - use `--force` if truncated (>200 elements)
+7. **Multiple matches are OK** - webctl clicks first match and warns you (check summary for notes)
+8. **Use `webctl inspect id=nXX`** to debug element attributes when needed
+9. **Output is compact by default** - use `--force` if truncated (>200 elements)
 
 ## Quick Start Template
 
@@ -681,7 +689,7 @@ webctl uses **compact output by default**. On large pages (>200 elements), it sh
 ```bash
 webctl snapshot                              # Compact output (fast)
 webctl snapshot --force                      # Full output even if large
-webctl snapshot --grep "button|submit"       # Filter by regex pattern
+webctl snapshot --filter "button|submit"     # Filter by regex pattern
 webctl snapshot --names-only                 # Minimal output (role + name only)
 webctl snapshot --max-name-length 50         # Truncate long names
 ```
@@ -691,7 +699,7 @@ webctl snapshot --max-name-length 50         # Truncate long names
 | Scenario | Command |
 |----------|---------|
 | Need all elements | `--force` |
-| Looking for specific text | `--grep "pattern"` |
+| Looking for specific text | `--filter "pattern"` |
 | Too much output | `--interactive-only` or `--within "role=main"` |
 
 ---
@@ -1532,7 +1540,7 @@ def cmd_snapshot(
         None, "--within", "-w", help="Scope to elements within container (e.g., 'role=main')"
     ),
     grep: str | None = typer.Option(
-        None, "--grep", "-g", help="Filter elements by pattern (regex on role+name)"
+        None, "--filter", "-f", "--grep", "-g", help="Filter elements by regex pattern on role+name"
     ),
     max_name_length: int | None = typer.Option(
         None, "--max-name-length", help="Truncate long names (default: no limit)"
@@ -1556,12 +1564,12 @@ def cmd_snapshot(
     it shows a preview. Use --force to see all elements.
 
     Examples:
-        webctl snapshot                          # Compact output
-        webctl snapshot --count                  # Just counts (zero context)
-        webctl snapshot --show-query             # Include query for each element
-        webctl snapshot --interactive-only       # Only buttons/links/inputs
-        webctl snapshot --grep "button|submit"   # Filter by pattern
-        webctl snapshot --force                  # Full output even if large
+        webctl snapshot                           # Compact output
+        webctl snapshot --count                   # Just counts (zero context)
+        webctl snapshot --show-query              # Include query for each element
+        webctl snapshot --interactive-only        # Only buttons/links/inputs
+        webctl snapshot --filter "button|submit"  # Filter by regex pattern
+        webctl snapshot --force                   # Full output even if large
     """
     asyncio.run(
         run_command(
@@ -1615,6 +1623,28 @@ def cmd_query(
     asyncio.run(
         run_command(
             "query",
+            {"query": query, "session": _session},
+        )
+    )
+
+
+@app.command("inspect")
+def cmd_inspect(
+    query: str = typer.Argument(..., help="Query to find element (e.g., 'id=n74', 'role=button name~=Submit')"),
+) -> None:
+    """Inspect an element's full attributes for debugging.
+
+    Shows all HTML attributes, ARIA properties, visibility state, and bounding box
+    for the matched element. Useful for debugging why an element can't be found.
+
+    Examples:
+        webctl inspect id=n74
+        webctl inspect "role=button name~=Submit"
+        webctl inspect "role=textbox"
+    """
+    asyncio.run(
+        run_command(
+            "inspect",
             {"query": query, "session": _session},
         )
     )
