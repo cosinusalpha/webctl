@@ -342,7 +342,7 @@ async def handle_inspect(
     """Inspect an element's full attributes for debugging."""
     from typing import cast
 
-    from .interact import resolve_with_fallback, ResolveError
+    from .interact import ResolveError, resolve_with_fallback
 
     session_id = request.args.get("session", "default")
     query_str = request.args.get("query", "")

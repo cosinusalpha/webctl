@@ -263,7 +263,7 @@ async def resolve_with_fallback(
         locator = page.get_by_title(search_term, exact=False)
         count = await locator.count()
         if count > 0:
-            warning = f"Found via title attribute (not aria-name)"
+            warning = "Found via title attribute (not aria-name)"
             if count > 1:
                 warning = f"Found {count} elements via title, using first. " + warning
             return ResolveSuccess(
@@ -279,7 +279,7 @@ async def resolve_with_fallback(
         locator = page.get_by_text(search_term, exact=False)
         count = await locator.count()
         if count > 0:
-            warning = f"Found via visible text (not aria-name)"
+            warning = "Found via visible text (not aria-name)"
             if count > 1:
                 warning = f"Found {count} elements via text, using first. " + warning
             return ResolveSuccess(
