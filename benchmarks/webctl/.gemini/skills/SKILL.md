@@ -16,7 +16,9 @@ CLI tool for browser automation. Use this instead of MCP browser tools - it give
 4. **ALWAYS use `--interactive-only`** with snapshot (unless you need to read page text)
 5. **ALWAYS use `name~="text"`** not `name="text"` (see "Why name~=" below)
 6. **ALWAYS quote queries:** `'role=button name~="Submit"'`
-7. **Output is compact by default** - use `--force` if truncated (>200 elements)
+7. **Multiple matches are OK** - webctl clicks first match and warns you (check summary for notes)
+8. **Use `webctl inspect id=nXX`** to debug element attributes when needed
+9. **Output is compact by default** - use `--force` if truncated (>200 elements)
 
 ## Quick Start Template
 
@@ -194,7 +196,7 @@ webctl uses **compact output by default**. On large pages (>200 elements), it sh
 ```bash
 webctl snapshot                              # Compact output (fast)
 webctl snapshot --force                      # Full output even if large
-webctl snapshot --grep "button|submit"       # Filter by regex pattern
+webctl snapshot --filter "button|submit"     # Filter by regex pattern
 webctl snapshot --names-only                 # Minimal output (role + name only)
 webctl snapshot --max-name-length 50         # Truncate long names
 ```
@@ -204,7 +206,7 @@ webctl snapshot --max-name-length 50         # Truncate long names
 | Scenario | Command |
 |----------|---------|
 | Need all elements | `--force` |
-| Looking for specific text | `--grep "pattern"` |
+| Looking for specific text | `--filter "pattern"` |
 | Too much output | `--interactive-only` or `--within "role=main"` |
 
 ---
