@@ -1,6 +1,6 @@
 [project]
 name = "webctl"
-version = "0.3.0"
+version = "0.3.1"
 description = "Browser automation via CLI — for humans and agents"
 readme = "README.md"
 license = { text = "MIT" }

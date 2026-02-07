@@ -1,15 +1,17 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.1] - 2026-01-26
 
 ### Added
 
 - Configurable browser selection: set `browser_executable_path` (or `WEBCTL_BROWSER_PATH`) to use a custom Chromium, and `use_global_playwright` to opt into global Playwright even when revisions mismatch.
 - Improved browser checks with explicit remediation guidance and support for skipping managed installs when a custom executable is provided.
+- Proxy configuration support: set `proxy_url`, `proxy_username`, and `proxy_password` to enable proxy usage in browser sessions, with enhanced CLI commands for proxy management.
 
 ### Changed
 
 - Browser setup, doctor, and start now honor custom/global selections and surface clearer version-mismatch warnings and fix commands.
+- CLI commands enhanced to support proxy configuration options and better proxy-related feedback.
 
 ## [0.3.0] - 2026-01-23
 

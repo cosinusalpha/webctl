@@ -1,0 +1,55 @@
+name: Create GitHub Release
+
+on:
+  push:
+    tags:
+      # Semver: v1.0.0, v1.0.0-alpha, v1.0.0-rc.1, v1.0.0+build
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required to create releases
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Build package
+        run: |
+          uv python install 3.12
+          uv build
+
+      - name: Extract changelog for version
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # Extract the changelog section for this version
+          # This regex looks for "## [X.Y.Z]" or "## [X.Y.Z] - DATE" and captures until the next "## [" or end of file
+          CHANGELOG=$(sed -n "/^## \[$VERSION\]/,/^## \[/p" CHANGELOG.md | sed '$d')
+          
+          # If no section found, try "## [Unreleased]"
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG=$(sed -n "/^## \[Unreleased\]/,/^## \[/p" CHANGELOG.md | sed '$d')
+          fi
+          
+          # Use EOF to handle multiline output
+          echo "body<<EOF" >> $GITHUB_ENV
+          echo "$CHANGELOG" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref }}
+          body: ${{ env.body }}
+          files: dist/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
