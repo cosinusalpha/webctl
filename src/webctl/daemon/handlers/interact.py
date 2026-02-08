@@ -61,10 +61,12 @@ class ResolveSuccess:
 
     element: dict[str, Any]
     all_matches: list[dict[str, Any]] | None = None
+    method: str = "aria"  # How element was found: aria, title, text, fuzzy
+    warning: str | None = None  # Warning message (e.g., multiple matches)
 
 
 async def resolve_element_detailed(
-    page: Page, query_str: str, strict: bool = True
+    page: Page, query_str: str, strict: bool = False
 ) -> ResolveSuccess | ResolveError:
     """Resolve a query to a single element with detailed error info."""
     from ...views.a11y import parse_aria_snapshot
@@ -132,9 +134,19 @@ async def resolve_element_detailed(
     try:
         result = resolver.resolve(query)
         if result.count > 0:
+            warning = None
+            if result.count > 1:
+                matches_preview = [
+                    f'{m.get("role")} "{m.get("name", "")[:30]}"' for m in result.matches[:3]
+                ]
+                warning = (
+                    f"Multiple matches ({result.count}), using first: {', '.join(matches_preview)}"
+                )
             return ResolveSuccess(
                 element=result.matches[0],
                 all_matches=result.matches if result.count > 1 else None,
+                method="aria",
+                warning=warning,
             )
     except NoMatchError:
         suggestions = []
@@ -210,12 +222,80 @@ async def resolve_element_detailed(
     )
 
 
-async def resolve_element(page: Page, query_str: str, strict: bool = True) -> dict[str, Any] | None:
+async def resolve_element(
+    page: Page, query_str: str, strict: bool = False
+) -> dict[str, Any] | None:
     """Resolve a query to a single element (simple API for backward compat)."""
     result = await resolve_element_detailed(page, query_str, strict)
     if isinstance(result, ResolveSuccess):
         return result.element
     return None
+
+
+def _extract_search_term(query_str: str) -> str | None:
+    """Extract the name pattern from a query string."""
+    match = re.search(r'name[~]?=["\']([^"\']+)["\']', query_str)
+    return match.group(1) if match else None
+
+
+async def resolve_with_fallback(
+    page: Page, query_str: str, strict: bool = False
+) -> ResolveSuccess | ResolveError:
+    """
+    Resolve element with automatic fallback chain:
+    1. aria-query (primary)
+    2. title attribute
+    3. visible text
+
+    Returns ResolveSuccess with method indicating how element was found.
+    """
+    # Strategy 1: aria-query (current behavior)
+    result = await resolve_element_detailed(page, query_str, strict)
+    if isinstance(result, ResolveSuccess):
+        return result
+
+    # Can't fallback without a search term
+    search_term = _extract_search_term(query_str)
+    if not search_term:
+        return result
+
+    # Strategy 2: title attribute
+    try:
+        locator = page.get_by_title(search_term, exact=False)
+        count = await locator.count()
+        if count > 0:
+            warning = "Found via title attribute (not aria-name)"
+            if count > 1:
+                warning = f"Found {count} elements via title, using first. " + warning
+            return ResolveSuccess(
+                element={"role": "unknown", "name": search_term, "_locator": locator},
+                method="title",
+                warning=warning,
+            )
+    except Exception:
+        pass
+
+    # Strategy 3: visible text
+    try:
+        locator = page.get_by_text(search_term, exact=False)
+        count = await locator.count()
+        if count > 0:
+            warning = "Found via visible text (not aria-name)"
+            if count > 1:
+                warning = f"Found {count} elements via text, using first. " + warning
+            return ResolveSuccess(
+                element={"role": "unknown", "name": search_term, "_locator": locator},
+                method="text",
+                warning=warning,
+            )
+    except Exception:
+        pass
+
+    # Return original error with additional suggestions
+    if isinstance(result, ResolveError):
+        result.suggestions.append(f"Also tried: title and text matching for '{search_term}'")
+
+    return result
 
 
 @register("click")
@@ -247,7 +327,7 @@ async def handle_click(
         return
 
     try:
-        result = await resolve_element_detailed(page, query)
+        result = await resolve_with_fallback(page, query)
         if isinstance(result, ResolveError):
             yield ErrorResponse(
                 req_id=request.req_id,
@@ -262,23 +342,34 @@ async def handle_click(
 
         element = result.element
 
-        # Get role and name to find element via Playwright
-        role = element.get("role")
-        name = element.get("name")
+        # Use pre-built locator from fallback, or build from role/name
+        if "_locator" in element:
+            locator = element["_locator"]
+        else:
+            role = element.get("role")
+            name = element.get("name")
+            locator = (
+                page.get_by_role(cast(Any, role), name=name)
+                if name
+                else page.get_by_role(cast(Any, role))
+            )
 
-        locator = (
-            page.get_by_role(cast(Any, role), name=name)
-            if name
-            else page.get_by_role(cast(Any, role))
-        )
+        role = element.get("role", "unknown")
+        name = element.get("name", "")
 
         # Click with retry support
         async def do_click() -> None:
+            await locator.first.scroll_into_view_if_needed()
             await locator.first.click()
 
         await with_retry(do_click, retry, retry_delay)
 
-        summary: dict[str, Any] = {"clicked": {"role": role, "name": name}}
+        summary: dict[str, Any] = {
+            "clicked": {"role": role, "name": name},
+            "resolved_by": result.method,
+        }
+        if result.warning:
+            summary["note"] = result.warning
         if wait_after:
             from .wait import perform_wait
 
@@ -333,7 +424,7 @@ async def handle_type(
         return
 
     try:
-        result = await resolve_element_detailed(page, query)
+        result = await resolve_with_fallback(page, query)
         if isinstance(result, ResolveError):
             yield ErrorResponse(
                 req_id=request.req_id,
@@ -347,17 +438,25 @@ async def handle_type(
             return
 
         element = result.element
-        role = element.get("role")
-        name = element.get("name")
 
-        locator = (
-            page.get_by_role(cast(Any, role), name=name)
-            if name
-            else page.get_by_role(cast(Any, role))
-        )
+        # Use pre-built locator from fallback, or build from role/name
+        if "_locator" in element:
+            locator = element["_locator"]
+        else:
+            role = element.get("role")
+            name = element.get("name")
+            locator = (
+                page.get_by_role(cast(Any, role), name=name)
+                if name
+                else page.get_by_role(cast(Any, role))
+            )
+
+        role = element.get("role", "unknown")
+        name = element.get("name", "")
 
         # Type with retry support
         async def do_type() -> None:
+            await locator.first.scroll_into_view_if_needed()
             if clear:
                 await locator.first.clear()
             await locator.first.fill(text)
@@ -366,7 +465,12 @@ async def handle_type(
 
         await with_retry(do_type, retry, retry_delay)
 
-        summary: dict[str, Any] = {"typed": {"role": role, "name": name, "text_length": len(text)}}
+        summary: dict[str, Any] = {
+            "typed": {"role": role, "name": name, "text_length": len(text)},
+            "resolved_by": result.method,
+        }
+        if result.warning:
+            summary["note"] = result.warning
         if wait_after:
             from .wait import perform_wait
 
@@ -416,7 +520,7 @@ async def handle_set_value(
         return
 
     try:
-        result = await resolve_element_detailed(page, query)
+        result = await resolve_with_fallback(page, query)
         if isinstance(result, ResolveError):
             yield ErrorResponse(
                 req_id=request.req_id,
@@ -430,18 +534,26 @@ async def handle_set_value(
             return
 
         element = result.element
-        role = element.get("role")
-        name = element.get("name")
 
-        locator = (
-            page.get_by_role(cast(Any, role), name=name)
-            if name
-            else page.get_by_role(cast(Any, role))
-        )
+        # Use pre-built locator from fallback, or build from role/name
+        if "_locator" in element:
+            locator = element["_locator"]
+        else:
+            role = element.get("role")
+            name = element.get("name")
+            locator = (
+                page.get_by_role(cast(Any, role), name=name)
+                if name
+                else page.get_by_role(cast(Any, role))
+            )
 
         await locator.first.fill(value)
 
-        yield DoneResponse(req_id=request.req_id, ok=True)
+        summary: dict[str, Any] = {"set_value": True, "resolved_by": result.method}
+        if result.warning:
+            summary["note"] = result.warning
+
+        yield DoneResponse(req_id=request.req_id, ok=True, summary=summary)
 
     except Exception as e:
         yield ErrorResponse(
@@ -474,7 +586,7 @@ async def handle_scroll(
     try:
         if query:
             # Scroll element into view
-            result = await resolve_element_detailed(page, query)
+            result = await resolve_with_fallback(page, query)
             if isinstance(result, ResolveError):
                 yield ErrorResponse(
                     req_id=request.req_id,
@@ -488,14 +600,18 @@ async def handle_scroll(
                 return
 
             element = result.element
-            role = element.get("role")
-            name = element.get("name")
 
-            locator = (
-                page.get_by_role(cast(Any, role), name=name)
-                if name
-                else page.get_by_role(cast(Any, role))
-            )
+            # Use pre-built locator from fallback, or build from role/name
+            if "_locator" in element:
+                locator = element["_locator"]
+            else:
+                role = element.get("role")
+                name = element.get("name")
+                locator = (
+                    page.get_by_role(cast(Any, role), name=name)
+                    if name
+                    else page.get_by_role(cast(Any, role))
+                )
 
             await locator.first.scroll_into_view_if_needed()
         else:
@@ -578,7 +694,7 @@ async def handle_select(
         return
 
     try:
-        result = await resolve_element_detailed(page, query)
+        result = await resolve_with_fallback(page, query)
         if isinstance(result, ResolveError):
             yield ErrorResponse(
                 req_id=request.req_id,
@@ -592,24 +708,36 @@ async def handle_select(
             return
 
         element = result.element
-        role = element.get("role")
-        name = element.get("name")
 
-        locator = (
-            page.get_by_role(cast(Any, role), name=name)
-            if name
-            else page.get_by_role(cast(Any, role))
-        )
+        # Use pre-built locator from fallback, or build from role/name
+        if "_locator" in element:
+            locator = element["_locator"]
+        else:
+            role = element.get("role")
+            name = element.get("name")
+            locator = (
+                page.get_by_role(cast(Any, role), name=name)
+                if name
+                else page.get_by_role(cast(Any, role))
+            )
 
+        await locator.first.scroll_into_view_if_needed()
         if value:
             await locator.first.select_option(value=value)
         else:
             await locator.first.select_option(label=label)
 
+        summary: dict[str, Any] = {
+            "selected": value or label,
+            "resolved_by": result.method,
+        }
+        if result.warning:
+            summary["note"] = result.warning
+
         yield DoneResponse(
             req_id=request.req_id,
             ok=True,
-            summary={"selected": value or label},
+            summary=summary,
         )
 
     except Exception as e:
@@ -648,7 +776,7 @@ async def handle_check(
         return
 
     try:
-        result = await resolve_element_detailed(page, query)
+        result = await resolve_with_fallback(page, query)
         if isinstance(result, ResolveError):
             yield ErrorResponse(
                 req_id=request.req_id,
@@ -662,18 +790,27 @@ async def handle_check(
             return
 
         element = result.element
-        role = element.get("role")
-        name = element.get("name")
 
-        locator = (
-            page.get_by_role(cast(Any, role), name=name)
-            if name
-            else page.get_by_role(cast(Any, role))
-        )
+        # Use pre-built locator from fallback, or build from role/name
+        if "_locator" in element:
+            locator = element["_locator"]
+        else:
+            role = element.get("role")
+            name = element.get("name")
+            locator = (
+                page.get_by_role(cast(Any, role), name=name)
+                if name
+                else page.get_by_role(cast(Any, role))
+            )
 
+        await locator.first.scroll_into_view_if_needed()
         await locator.first.check()
 
-        yield DoneResponse(req_id=request.req_id, ok=True, summary={"checked": True})
+        summary: dict[str, Any] = {"checked": True, "resolved_by": result.method}
+        if result.warning:
+            summary["note"] = result.warning
+
+        yield DoneResponse(req_id=request.req_id, ok=True, summary=summary)
 
     except Exception as e:
         screenshot_path = await capture_error_screenshot(page, "check", "check_failed")
@@ -711,7 +848,7 @@ async def handle_uncheck(
         return
 
     try:
-        result = await resolve_element_detailed(page, query)
+        result = await resolve_with_fallback(page, query)
         if isinstance(result, ResolveError):
             yield ErrorResponse(
                 req_id=request.req_id,
@@ -725,18 +862,27 @@ async def handle_uncheck(
             return
 
         element = result.element
-        role = element.get("role")
-        name = element.get("name")
 
-        locator = (
-            page.get_by_role(cast(Any, role), name=name)
-            if name
-            else page.get_by_role(cast(Any, role))
-        )
+        # Use pre-built locator from fallback, or build from role/name
+        if "_locator" in element:
+            locator = element["_locator"]
+        else:
+            role = element.get("role")
+            name = element.get("name")
+            locator = (
+                page.get_by_role(cast(Any, role), name=name)
+                if name
+                else page.get_by_role(cast(Any, role))
+            )
 
+        await locator.first.scroll_into_view_if_needed()
         await locator.first.uncheck()
 
-        yield DoneResponse(req_id=request.req_id, ok=True, summary={"checked": False})
+        summary: dict[str, Any] = {"checked": False, "resolved_by": result.method}
+        if result.warning:
+            summary["note"] = result.warning
+
+        yield DoneResponse(req_id=request.req_id, ok=True, summary=summary)
 
     except Exception as e:
         screenshot_path = await capture_error_screenshot(page, "uncheck", "uncheck_failed")
@@ -784,7 +930,7 @@ async def handle_upload(
 
     try:
         # For file inputs, we can use set_input_files directly on the locator
-        result = await resolve_element_detailed(page, query)
+        result = await resolve_with_fallback(page, query)
         if isinstance(result, ResolveError):
             yield ErrorResponse(
                 req_id=request.req_id,
@@ -798,21 +944,30 @@ async def handle_upload(
             return
 
         element = result.element
-        role = element.get("role")
-        name = element.get("name")
 
-        locator = (
-            page.get_by_role(cast(Any, role), name=name)
-            if name
-            else page.get_by_role(cast(Any, role))
-        )
+        # Use pre-built locator from fallback, or build from role/name
+        if "_locator" in element:
+            locator = element["_locator"]
+        else:
+            role = element.get("role")
+            name = element.get("name")
+            locator = (
+                page.get_by_role(cast(Any, role), name=name)
+                if name
+                else page.get_by_role(cast(Any, role))
+            )
 
+        await locator.first.scroll_into_view_if_needed()
         await locator.first.set_input_files(file_path)
+
+        summary: dict[str, Any] = {"uploaded": file_path, "resolved_by": result.method}
+        if result.warning:
+            summary["note"] = result.warning
 
         yield DoneResponse(
             req_id=request.req_id,
             ok=True,
-            summary={"uploaded": file_path},
+            summary=summary,
         )
 
     except Exception as e:

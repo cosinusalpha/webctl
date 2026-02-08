@@ -64,7 +64,8 @@ webctl init --global     # Global (works across all projects)
 This creates:
 
 - **Skills** for Claude Code and Goose (loaded on-demand when doing web tasks)
-- **Lean prompts** for Gemini, Copilot, and Codex (always in context)
+- **Lean prompts** for Copilot and Codex (always in context)
+- **Gemini skills** support via `.gemini/skills` (on-demand activation, default)
 
 **Supported agents:**
 
@@ -72,6 +73,7 @@ This creates:
 |------------------|--------|-----------------------------------|-------------------------------------------|
 | `claude`         | Skill  | `.claude/skills/webctl/SKILL.md`  | `~/.claude/skills/webctl/SKILL.md`        |
 | `goose`          | Skill  | `.agents/skills/webctl/SKILL.md`  | `~/.config/agents/skills/webctl/SKILL.md` |
+| `gemini-skill`   | Skill  | `.gemini/skills/webctl/SKILL.md`  | `~/.gemini/skills/webctl/SKILL.md`        |
 | `gemini`         | Prompt | `GEMINI.md`                       | `~/.gemini/GEMINI.md`                     |
 | `copilot`        | Prompt | `.github/copilot-instructions.md` | -                                         |
 | `codex`          | Prompt | `AGENTS.md`                       | `~/.codex/AGENTS.md`                      |
@@ -82,7 +84,9 @@ This creates:
 **Select specific agents:**
 
 ```bash
-webctl init --agents claude,gemini    # Only Claude and Gemini
+webctl init --agents claude,gemini-skill  # Only Claude and Gemini skill
+webctl init --agents gemini-skill     # Gemini skill (on-demand)
+webctl init --agents gemini           # Gemini prompt (always in context)
 webctl init --agents claude-noskill   # Legacy CLAUDE.md format
 ```
 
@@ -161,6 +165,19 @@ webctl --result-only --format jsonl navigate "..." # Pure JSON
 
 ---
 
+## Smart Defaults for AI Agents
+
+webctl is designed to "just work" for AI agents with pragmatic defaults:
+
+- **Multiple matches?** Clicks first match, warns you (check summary for `note` field)
+- **Element off-screen?** Auto-scrolls before clicking
+- **Aria name not found?** Tries title attribute, then visible text
+- **Need to debug?** `webctl inspect id=n74` shows all element attributes
+
+These defaults reduce friction and make automation more robust. The summary output includes `resolved_by` to show how the element was found (aria, title, or text).
+
+---
+
 ## Commands
 
 ### Navigation & Observation
@@ -171,6 +188,7 @@ webctl back / forward / reload
 webctl snapshot --interactive-only        # Buttons, links, inputs only
 webctl snapshot --within "role=main"      # Scope to container
 webctl query "role=button name~=Submit"   # Debug query
+webctl inspect id=n74                     # Debug element attributes
 webctl screenshot --path shot.png
 ```
 

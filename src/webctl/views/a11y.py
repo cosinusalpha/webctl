@@ -96,12 +96,23 @@ def parse_aria_snapshot(snapshot: str) -> list[dict[str, Any]]:
             item["role"] = match.group(1)
             line = line[len(match.group(0)) :].strip()
 
-        # Extract quoted name
+        # Extract quoted name (handle escaped quotes like \"text\")
         if line.startswith('"'):
-            end_quote = line.find('"', 1)
-            if end_quote > 0:
-                item["name"] = line[1:end_quote]
-                line = line[end_quote + 1 :].strip()
+            i = 1
+            name_chars = []
+            while i < len(line):
+                if line[i] == "\\" and i + 1 < len(line) and line[i + 1] == '"':
+                    # Escaped quote becomes literal quote in name
+                    name_chars.append('"')
+                    i += 2
+                elif line[i] == '"':
+                    # Unescaped quote - end of name
+                    item["name"] = "".join(name_chars)
+                    line = line[i + 1 :].strip()
+                    break
+                else:
+                    name_chars.append(line[i])
+                    i += 1
 
         # Extract attributes in brackets
         if line.startswith("["):
