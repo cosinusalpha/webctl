@@ -56,9 +56,7 @@ def _is_third_party(url_hostname: str, source_hostname: str | None) -> bool:
     return get_domain(url_hostname) != get_domain(source_hostname)
 
 
-def _domain_matches(
-    hostname: str, included: set[str], excluded: set[str]
-) -> bool:
+def _domain_matches(hostname: str, included: set[str], excluded: set[str]) -> bool:
     """Check if hostname matches domain constraints."""
     # If no domain constraints, matches all
     if not included and not excluded:
@@ -116,9 +114,7 @@ class NetworkFilterMatcher:
 
         if f.is_hostname_anchor and f.hostname:
             # Index by hostname
-            index = (
-                self._exception_hostname_index if f.is_exception else self._hostname_index
-            )
+            index = self._exception_hostname_index if f.is_exception else self._hostname_index
             if f.hostname not in index:
                 index[f.hostname] = []
             index[f.hostname].append(f)
@@ -289,7 +285,9 @@ class NetworkFilterMatcher:
             pattern = f.pattern
             if f.is_hostname_anchor and f.hostname:
                 # Pattern is the part after hostname
-                pattern = f.pattern[len(f.hostname) :] if f.pattern.startswith(f.hostname) else f.pattern
+                pattern = (
+                    f.pattern[len(f.hostname) :] if f.pattern.startswith(f.hostname) else f.pattern
+                )
             return pattern.lower() in url.lower() if pattern else True
 
         # Use regex for complex patterns

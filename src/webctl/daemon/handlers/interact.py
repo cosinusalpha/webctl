@@ -137,10 +137,11 @@ async def resolve_element_detailed(
             warning = None
             if result.count > 1:
                 matches_preview = [
-                    f"{m.get('role')} \"{m.get('name', '')[:30]}\""
-                    for m in result.matches[:3]
+                    f'{m.get("role")} "{m.get("name", "")[:30]}"' for m in result.matches[:3]
                 ]
-                warning = f"Multiple matches ({result.count}), using first: {', '.join(matches_preview)}"
+                warning = (
+                    f"Multiple matches ({result.count}), using first: {', '.join(matches_preview)}"
+                )
             return ResolveSuccess(
                 element=result.matches[0],
                 all_matches=result.matches if result.count > 1 else None,
@@ -221,7 +222,9 @@ async def resolve_element_detailed(
     )
 
 
-async def resolve_element(page: Page, query_str: str, strict: bool = False) -> dict[str, Any] | None:
+async def resolve_element(
+    page: Page, query_str: str, strict: bool = False
+) -> dict[str, Any] | None:
     """Resolve a query to a single element (simple API for backward compat)."""
     result = await resolve_element_detailed(page, query_str, strict)
     if isinstance(result, ResolveSuccess):
@@ -236,9 +239,7 @@ def _extract_search_term(query_str: str) -> str | None:
 
 
 async def resolve_with_fallback(
-    page: Page,
-    query_str: str,
-    strict: bool = False
+    page: Page, query_str: str, strict: bool = False
 ) -> ResolveSuccess | ResolveError:
     """
     Resolve element with automatic fallback chain:
@@ -292,9 +293,7 @@ async def resolve_with_fallback(
 
     # Return original error with additional suggestions
     if isinstance(result, ResolveError):
-        result.suggestions.append(
-            f"Also tried: title and text matching for '{search_term}'"
-        )
+        result.suggestions.append(f"Also tried: title and text matching for '{search_term}'")
 
     return result
 

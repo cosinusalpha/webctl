@@ -64,7 +64,8 @@ webctl init --global     # Global (works across all projects)
 This creates:
 
 - **Skills** for Claude Code and Goose (loaded on-demand when doing web tasks)
-- **Lean prompts** for Gemini, Copilot, and Codex (always in context)
+- **Lean prompts** for Copilot and Codex (always in context)
+- **Gemini skills** support via `.gemini/skills` (on-demand activation, default)
 
 **Supported agents:**
 
@@ -72,6 +73,7 @@ This creates:
 |------------------|--------|-----------------------------------|-------------------------------------------|
 | `claude`         | Skill  | `.claude/skills/webctl/SKILL.md`  | `~/.claude/skills/webctl/SKILL.md`        |
 | `goose`          | Skill  | `.agents/skills/webctl/SKILL.md`  | `~/.config/agents/skills/webctl/SKILL.md` |
+| `gemini-skill`   | Skill  | `.gemini/skills/webctl/SKILL.md`  | `~/.gemini/skills/webctl/SKILL.md`        |
 | `gemini`         | Prompt | `GEMINI.md`                       | `~/.gemini/GEMINI.md`                     |
 | `copilot`        | Prompt | `.github/copilot-instructions.md` | -                                         |
 | `codex`          | Prompt | `AGENTS.md`                       | `~/.codex/AGENTS.md`                      |
@@ -82,7 +84,9 @@ This creates:
 **Select specific agents:**
 
 ```bash
-webctl init --agents claude,gemini    # Only Claude and Gemini
+webctl init --agents claude,gemini-skill  # Only Claude and Gemini skill
+webctl init --agents gemini-skill     # Gemini skill (on-demand)
+webctl init --agents gemini           # Gemini prompt (always in context)
 webctl init --agents claude-noskill   # Legacy CLAUDE.md format
 ```
 

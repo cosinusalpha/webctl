@@ -101,14 +101,14 @@ def parse_aria_snapshot(snapshot: str) -> list[dict[str, Any]]:
             i = 1
             name_chars = []
             while i < len(line):
-                if line[i] == '\\' and i + 1 < len(line) and line[i + 1] == '"':
+                if line[i] == "\\" and i + 1 < len(line) and line[i + 1] == '"':
                     # Escaped quote becomes literal quote in name
                     name_chars.append('"')
                     i += 2
                 elif line[i] == '"':
                     # Unescaped quote - end of name
-                    item["name"] = ''.join(name_chars)
-                    line = line[i + 1:].strip()
+                    item["name"] = "".join(name_chars)
+                    line = line[i + 1 :].strip()
                     break
                 else:
                     name_chars.append(line[i])

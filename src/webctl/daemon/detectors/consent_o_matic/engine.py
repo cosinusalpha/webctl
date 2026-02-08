@@ -103,9 +103,7 @@ class ConsentOMaticEngine:
             logger.debug("Error during consent handling: %s", e)
             return result
 
-    async def _detect_cmp(
-        self, page: Page, raw_rules: dict[str, Any]
-    ) -> str | None:
+    async def _detect_cmp(self, page: Page, raw_rules: dict[str, Any]) -> str | None:
         """Detect which CMP is present on the page."""
         # Check each CMP's detection rules
         for cmp_name, cmp_rule in raw_rules.items():
@@ -113,9 +111,7 @@ class ConsentOMaticEngine:
                 detectors = cmp_rule.get("detectors", [])
                 for detector in detectors:
                     present_matcher = detector.get("presentMatcher")
-                    if present_matcher and await self._check_matcher(
-                        page, present_matcher
-                    ):
+                    if present_matcher and await self._check_matcher(page, present_matcher):
                         return cmp_name
             except Exception as e:
                 logger.debug("Error checking CMP %s: %s", cmp_name, e)
@@ -169,9 +165,7 @@ class ConsentOMaticEngine:
 
         return True
 
-    async def _check_checkbox_matcher(
-        self, page: Page, matcher: dict[str, Any]
-    ) -> bool:
+    async def _check_checkbox_matcher(self, page: Page, matcher: dict[str, Any]) -> bool:
         """Check if a checkbox is checked."""
         target = matcher.get("target")
         if not target:

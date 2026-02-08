@@ -29,9 +29,7 @@ def _get_hostname_variants(hostname: str) -> list[str]:
     return variants
 
 
-def _domain_matches(
-    hostname: str, included: set[str], excluded: set[str]
-) -> bool:
+def _domain_matches(hostname: str, included: set[str], excluded: set[str]) -> bool:
     """Check if hostname matches domain constraints."""
     hostname = hostname.lower()
     hostname_variants = _get_hostname_variants(hostname)

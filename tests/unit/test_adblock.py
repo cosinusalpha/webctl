@@ -511,5 +511,59 @@ class TestIntegrationWithConfig:
             json.dump({}, f)
 
         config = WebctlConfig.load(config_path)
-        assert config.adblock_enabled is True  # Enabled by default
+        assert config.adblock_enabled is False  # Disabled by default
         assert config.adblock_lists is None  # Use default lists
+
+    def test_resolve_adblock_settings_env_overrides(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that env vars override adblock config."""
+        import json
+
+        from webctl.config import resolve_adblock_settings
+
+        config_dir = tmp_path / "webctl"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_path = config_dir / "config.json"
+        with open(config_path, "w") as f:
+            json.dump(
+                {
+                    "adblock_enabled": False,
+                    "adblock_lists": ["easylist"],
+                },
+                f,
+            )
+
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        monkeypatch.setenv("WEBCTL_ADBLOCK_ENABLED", "0")
+        monkeypatch.setenv("WEBCTL_ADBLOCK_LISTS", "ublock-filters, easyprivacy")
+
+        enabled, lists = resolve_adblock_settings()
+        assert enabled is False
+        assert lists == ["ublock-filters", "easyprivacy"]
+
+    def test_resolve_adblock_settings_env_lists_special_values(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test special values for WEBCTL_ADBLOCK_LISTS."""
+        import json
+
+        from webctl.config import resolve_adblock_settings
+
+        config_dir = tmp_path / "webctl"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_path = config_dir / "config.json"
+        with open(config_path, "w") as f:
+            json.dump({"adblock_enabled": True, "adblock_lists": ["easylist"]}, f)
+
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+        monkeypatch.setenv("WEBCTL_ADBLOCK_LISTS", "default")
+        enabled, lists = resolve_adblock_settings()
+        assert enabled is False
+        assert lists is None
+
+        monkeypatch.setenv("WEBCTL_ADBLOCK_LISTS", "none")
+        enabled, lists = resolve_adblock_settings()
+        assert enabled is False
+        assert lists == []

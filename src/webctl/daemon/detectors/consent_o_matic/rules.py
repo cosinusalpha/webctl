@@ -22,9 +22,7 @@ from webctl.config import get_data_dir
 
 logger = logging.getLogger(__name__)
 
-RULES_URL = (
-    "https://raw.githubusercontent.com/cavi-au/Consent-O-Matic/master/Rules.json"
-)
+RULES_URL = "https://raw.githubusercontent.com/cavi-au/Consent-O-Matic/master/Rules.json"
 RULES_CACHE_TTL = 86400 * 7  # 7 days
 
 
@@ -76,13 +74,9 @@ class CMPRule:
         detect_popup = []
         for detector in detectors:
             if "presentMatcher" in detector:
-                detect_cmp.append(
-                    CMPDetector(present_matcher=detector.get("presentMatcher"))
-                )
+                detect_cmp.append(CMPDetector(present_matcher=detector.get("presentMatcher")))
             if "showingMatcher" in detector:
-                detect_popup.append(
-                    CMPDetector(showing_matcher=detector.get("showingMatcher"))
-                )
+                detect_popup.append(CMPDetector(showing_matcher=detector.get("showingMatcher")))
 
         opt_in = []
         opt_out = []

@@ -47,7 +47,7 @@ class WebctlConfig:
     proxy_bypass: str | None = None  # comma-separated bypass list
 
     # Adblock settings
-    adblock_enabled: bool = True  # Enable adblock filtering
+    adblock_enabled: bool = False  # Enable adblock filtering
     adblock_lists: list[str] | None = None  # None = use default lists
 
     @classmethod
@@ -240,6 +240,11 @@ def resolve_adblock_settings() -> tuple[bool, list[str] | None]:
     1. WEBCTL_ADBLOCK_ENABLED environment variable (0/1/true/false)
     2. adblock_enabled from config file
 
+    Adblock list overrides:
+    - WEBCTL_ADBLOCK_LISTS environment variable (comma-separated list)
+      Special values: "default" (use default lists), "none" (no lists)
+    - adblock_lists from config file
+
     Returns (enabled, list_names) tuple.
     """
     cfg = WebctlConfig.load()
@@ -251,7 +256,19 @@ def resolve_adblock_settings() -> tuple[bool, list[str] | None]:
     else:
         enabled = cfg.adblock_enabled
 
-    return enabled, cfg.adblock_lists
+    env_lists = os.environ.get("WEBCTL_ADBLOCK_LISTS")
+    if env_lists is not None:
+        normalized = env_lists.strip().lower()
+        if normalized in ("", "default", "defaults"):
+            lists = None
+        elif normalized in ("none", "off", "disabled"):
+            lists = []
+        else:
+            lists = [part.strip().lower() for part in env_lists.split(",") if part.strip()]
+    else:
+        lists = cfg.adblock_lists
+
+    return enabled, lists
 
 
 # Default settings (RFC SS6, SS13)

@@ -71,9 +71,7 @@ class FilterListManager:
         self._metadata: dict[str, FilterListMetadata] = {}
         self._lock = asyncio.Lock()
 
-    async def get_filter_lists(
-        self, list_names: list[str] | None = None
-    ) -> dict[str, str]:
+    async def get_filter_lists(self, list_names: list[str] | None = None) -> dict[str, str]:
         """Get filter lists, loading from cache or fetching if needed.
 
         Args:

@@ -125,9 +125,7 @@ class TargetResolver:
             )
 
             # Try to find parent matching the parent selector that contains our element
-            parent_locator = root_context.locator(
-                f"{parent_selector}:has({original_selector})"
-            )
+            parent_locator = root_context.locator(f"{parent_selector}:has({original_selector})")
 
             if await parent_locator.count() > 0:
                 # Apply child filter if specified
@@ -400,9 +398,7 @@ class ActionExecutor:
                         if matcher:
                             target = matcher.get("target")
                             if target:
-                                locator = await self._target_resolver.resolve(
-                                    target, context
-                                )
+                                locator = await self._target_resolver.resolve(target, context)
                                 if locator is None:
                                     # Not already enabled, toggle it on
                                     await self.execute(toggle_action, context)
@@ -419,9 +415,7 @@ class ActionExecutor:
                         if matcher:
                             target = matcher.get("target")
                             if target:
-                                locator = await self._target_resolver.resolve(
-                                    target, context
-                                )
+                                locator = await self._target_resolver.resolve(target, context)
                                 if locator is not None:
                                     # Currently enabled, toggle it off
                                     await self.execute(toggle_action, context)

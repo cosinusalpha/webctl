@@ -459,6 +459,9 @@ AGENT_PROMPT = """# webctl - Browser Control
 
 Start: `webctl start` | End: `webctl stop --daemon`
 
+## Escalation (Required in Codex sandbox)
+`webctl` uses a Unix domain socket. In the Codex sandbox, creating sockets is blocked, so any `webctl` command must be run with escalation. If you see `Operation not permitted` or `Failed to start daemon`, rerun with escalation enabled.
+
 ## Quick Reference
 - `webctl snapshot --count` - Just element counts (zero context)
 - `webctl snapshot --interactive-only` - See clickable elements
@@ -500,6 +503,9 @@ allowed-tools: Bash, Read
 # webctl - Browser Automation CLI
 
 CLI tool for browser automation. Use this instead of MCP browser tools - it gives you control over what enters your context.
+
+## Escalation (Required in Codex sandbox)
+`webctl` uses a Unix domain socket. In the Codex sandbox, creating sockets is blocked, so any `webctl` command must be run with escalation. If you see `Operation not permitted` or `Failed to start daemon`, rerun with escalation enabled.
 
 ## RULES (Read First!)
 
@@ -1156,6 +1162,13 @@ AGENT_CONFIGS = {
         "global_file": Path.home() / ".gemini" / "GEMINI.md",
         "description": "Google Gemini CLI",
     },
+    "gemini-skill": {
+        "name": "Gemini CLI (skill)",
+        "skill": True,
+        "file": Path(".gemini") / "skills" / "webctl" / "SKILL.md",
+        "global_file": Path.home() / ".gemini" / "skills" / "webctl" / "SKILL.md",
+        "description": "Google Gemini CLI skill",
+    },
     "copilot": {
         "name": "GitHub Copilot",
         "file": Path(".github") / "copilot-instructions.md",
@@ -1171,7 +1184,7 @@ AGENT_CONFIGS = {
 }
 
 # Default agents (claude-noskill excluded from default)
-DEFAULT_AGENTS = ["claude", "goose", "gemini", "copilot", "codex"]
+DEFAULT_AGENTS = ["claude", "goose", "gemini-skill", "copilot", "codex"]
 
 
 def _file_contains_webctl(filepath: Path) -> bool:
@@ -1238,7 +1251,7 @@ def cmd_init(
         None,
         "--agents",
         "-a",
-        help="Comma-separated agents: claude,goose,gemini,copilot,codex,claude-noskill",
+        help="Comma-separated agents: claude,goose,gemini,gemini-skill,copilot,codex,claude-noskill",
     ),
     force: bool = typer.Option(
         False, "--force", "-f", help="Overwrite even if webctl instructions already exist"
@@ -1262,6 +1275,7 @@ def cmd_init(
       claude        - .claude/skills/webctl/SKILL.md (Claude Code skill)
       goose         - .agents/skills/webctl/SKILL.md (Goose skill)
       gemini        - GEMINI.md (Google Gemini CLI)
+      gemini-skill  - .gemini/skills/webctl/SKILL.md (Google Gemini CLI skill)
       copilot       - .github/copilot-instructions.md (GitHub Copilot)
       codex         - AGENTS.md (OpenAI Codex CLI)
       claude-noskill - CLAUDE.md (Claude Code legacy, always in context)
@@ -1386,13 +1400,24 @@ def cmd_init(
 
 @app.command("start")
 def cmd_start(
-    mode: str = typer.Option("attended", "--mode", "-m", help="Mode: attended or unattended"),
+    mode: str | None = typer.Option(
+        None,
+        "--mode",
+        "-m",
+        help="Mode: attended or unattended (default: config default_mode)",
+    ),
     auto_setup: bool = typer.Option(
         True, "--auto-setup/--no-auto-setup", help="Auto-install browser if missing"
     ),
 ) -> None:
     """Start a browser session."""
     custom_path, allow_global = resolve_browser_settings()
+    if mode is None:
+        mode = WebctlConfig.load().default_mode
+    if mode not in ("attended", "unattended"):
+        print_error(f"Invalid mode: {mode}")
+        print("Valid modes: attended, unattended")
+        raise typer.Exit(1)
 
     # Check if browser is installed
     if auto_setup:
@@ -1557,6 +1582,9 @@ def cmd_snapshot(
     count_only: bool = typer.Option(
         False, "--count", "-c", help="Only output element counts, no elements (zero context cost)"
     ),
+    force: bool = typer.Option(
+        False, "--force", "-F", help="Show full output even if large (>200 elements)"
+    ),
 ) -> None:
     """Take a snapshot of the current page.
 
@@ -1571,6 +1599,9 @@ def cmd_snapshot(
         webctl snapshot --filter "button|submit"  # Filter by regex pattern
         webctl snapshot --force                   # Full output even if large
     """
+    global _force
+    if force:
+        _force = True
     asyncio.run(
         run_command(
             "snapshot",
@@ -1630,7 +1661,9 @@ def cmd_query(
 
 @app.command("inspect")
 def cmd_inspect(
-    query: str = typer.Argument(..., help="Query to find element (e.g., 'id=n74', 'role=button name~=Submit')"),
+    query: str = typer.Argument(
+        ..., help="Query to find element (e.g., 'id=n74', 'role=button name~=Submit')"
+    ),
 ) -> None:
     """Inspect an element's full attributes for debugging.
 

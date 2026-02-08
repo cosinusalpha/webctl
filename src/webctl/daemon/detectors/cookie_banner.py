@@ -151,6 +151,20 @@ class CookieBannerDismisser:
             logger.debug("Consent-O-Matic failed: %s", e)
             details["consent_o_matic_error"] = str(e)
 
+        # Before clicking anything, confirm a cookie banner is likely present.
+        banner_detected = await self._check_banner_exists(page)
+        if not banner_detected:
+            if await self._check_known_cmp_roots(page):
+                banner_detected = True
+
+        if not banner_detected:
+            return CookieBannerResult(
+                detected=False,
+                dismissed=False,
+                method=None,
+                details=details,
+            )
+
         # Strategy 1: Find and click accept button via a11y tree (FALLBACK)
         try:
             snapshot_str = await page.locator("body").aria_snapshot()
@@ -374,6 +388,32 @@ class CookieBannerDismisser:
                                     return True
                         except Exception:
                             continue
+        except Exception:
+            pass
+        return False
+
+    async def _check_known_cmp_roots(self, page: Page) -> bool:
+        """Check for known CMP root containers that indicate a banner is present."""
+        selectors = [
+            "#onetrust-banner-sdk",
+            "#onetrust-consent-sdk",
+            "#CybotCookiebotDialog",
+            "#didomi-notice",
+            "#usercentrics-root",
+            ".qc-cmp2-container",
+            ".osano-cm-window",
+            ".iubenda-cs-container",
+            ".klaro",
+        ]
+        try:
+            for selector in selectors:
+                locator = page.locator(selector)
+                if await locator.count() > 0:
+                    try:
+                        if await locator.first.is_visible():
+                            return True
+                    except Exception:
+                        return True
         except Exception:
             pass
         return False
