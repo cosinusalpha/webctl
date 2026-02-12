@@ -43,6 +43,8 @@ Beyond filtering, CLI gives you:
 | **Script**         | Save to .sh, version control  | Ephemeral              |
 | **Human takeover** | Same commands                 | Different interface    |
 
+*See also: [MCP Considered Suboptimal](https://github.com/kb4ai/mcp-considered-suboptimal-pub-kb) — a community knowledge base collecting CLI-over-MCP patterns and alternatives.*
+
 ---
 
 ## Agent Integration
