@@ -20,7 +20,12 @@ from playwright.async_api import (
     async_playwright,
 )
 
-from ..config import get_profile_dir, resolve_browser_settings, resolve_proxy_settings
+from ..config import (
+    WebctlConfig,
+    get_profile_dir,
+    resolve_browser_settings,
+    resolve_proxy_settings,
+)
 from ..security.domain_policy import DomainPolicy
 from .detectors.action import ActionDetector
 from .detectors.auth import AuthDetector
@@ -56,6 +61,7 @@ class SessionState:
     auto_dismiss_cookies: bool = True  # Auto-dismiss cookie banners
     _page_counter: int = 0
     _dismissed_domains: set[str] = field(default_factory=set)  # Track domains where we dismissed
+    _navigating_pages: set[str] = field(default_factory=set)  # Pages with active navigate command
 
 
 class SessionManager:
@@ -113,9 +119,18 @@ class SessionManager:
             async with aiofiles.open(state_file) as f:
                 storage_state = json.loads(await f.read())
 
-        context = await browser.new_context(
-            storage_state=storage_state, viewport={"width": 1280, "height": 720}
-        )
+        cfg = WebctlConfig.load()
+        if mode == "unattended" and cfg.mobile_emulation:
+            # Mobile emulation: cleaner pages, fewer ads, simpler layouts
+            device = self._playwright.devices["Pixel 7"]
+            context = await browser.new_context(
+                storage_state=storage_state,
+                **device,
+            )
+        else:
+            context = await browser.new_context(
+                storage_state=storage_state, viewport={"width": 1280, "height": 720}
+            )
 
         session = SessionState(
             session_id=session_id,
@@ -242,8 +257,9 @@ class SessionManager:
         url = frame.url
         page_info.url = url
 
-        # Auto-dismiss cookie banners if enabled
-        if session.auto_dismiss_cookies:
+        # Auto-dismiss cookie banners for non-navigate navigations (link clicks, etc.)
+        # Skip if navigate handler is already handling this page to avoid races.
+        if session.auto_dismiss_cookies and page_id not in session._navigating_pages:
             await self._try_dismiss_cookies(session, page_info.page, url)
 
         # Check for auth requirement (including CAPTCHA)

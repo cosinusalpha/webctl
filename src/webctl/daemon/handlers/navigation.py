@@ -7,10 +7,50 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from ...protocol.messages import DoneResponse, ErrorResponse, Request, Response
+from ...views.a11y import A11yExtractOptions, extract_a11y_view
 from ..detectors.cookie_banner import dismiss_cookie_banner
 from ..event_emitter import EventEmitter
 from ..session_manager import SessionManager
 from .registry import register
+
+
+async def _build_page_summary(page: "Page") -> dict[str, Any]:  # noqa: F821
+    """Build a compact page summary with headings, top interactive elements, and markdown preview."""
+    summary: dict[str, Any] = {"url": page.url, "title": await page.title()}
+
+    # Collect compact a11y overview: headings + first interactive elements
+    try:
+        headings: list[str] = []
+        interactive: list[str] = []
+        options = A11yExtractOptions(
+            include_path_hint=False,
+            names_only=True,
+            interesting_only=True,
+        )
+        async for item in extract_a11y_view(page, options):
+            role = item.get("role", "")
+            name = item.get("name", "")
+            label = f'{role} "{name}"' if name else role
+            if role == "heading" and len(headings) < 5:
+                headings.append(label)
+            elif role in {
+                "button",
+                "link",
+                "textbox",
+                "searchbox",
+                "combobox",
+                "checkbox",
+            } and len(interactive) < 10:
+                interactive.append(label)
+            # Stop early once we have enough
+            if len(headings) >= 5 and len(interactive) >= 10:
+                break
+        summary["headings"] = headings
+        summary["interactive"] = interactive
+    except Exception:
+        pass
+
+    return summary
 
 
 @register("navigate")
@@ -67,16 +107,25 @@ async def handle_navigate(
         page_id = session_manager.get_active_page_id(session_id)
         await event_emitter.emit_navigation_started(url, page_id)
 
+        # Mark page as navigating to prevent session_manager's _on_navigation
+        # from racing with our cookie dismiss below
+        session._navigating_pages.add(page_id)
+
         # Navigate
         await page.goto(url, wait_until=wait_until)
 
-        # Auto-dismiss cookie banners
-        await asyncio.sleep(0.5)  # Brief wait for banners to appear
+        # Auto-dismiss cookie banners (try twice — iframes may load late)
+        await asyncio.sleep(1.5)
         cookie_result = await dismiss_cookie_banner(page)
+        if not cookie_result.dismissed:
+            await asyncio.sleep(2.0)
+            cookie_result = await dismiss_cookie_banner(page)
+
+        session._navigating_pages.discard(page_id)
 
         await event_emitter.emit_navigation_finished(page.url, page_id)
 
-        summary: dict[str, Any] = {"url": page.url, "title": await page.title()}
+        summary = await _build_page_summary(page)
         if cookie_result.dismissed:
             summary["cookie_banner_dismissed"] = True
 
@@ -86,6 +135,7 @@ async def handle_navigate(
             summary=summary,
         )
     except Exception as e:
+        session._navigating_pages.discard(page_id)
         yield ErrorResponse(req_id=request.req_id, error=str(e))
 
 

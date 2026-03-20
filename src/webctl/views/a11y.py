@@ -129,7 +129,7 @@ def parse_aria_snapshot(snapshot: str) -> list[dict[str, Any]]:
         if line.startswith(":"):
             content = line[1:].strip()
             if content and "name" not in item:
-                item["description"] = content
+                item["name"] = content
 
         # Add depth for path calculation
         item["_depth"] = depth

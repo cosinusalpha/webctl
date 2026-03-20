@@ -11,55 +11,85 @@ Rendered, visible content:
 Bounded by size limits.
 """
 
+import io
 import re
 from collections.abc import AsyncIterator
+from importlib.resources import files
 from typing import Any
 
-from markdownify import markdownify
+from markitdown import MarkItDown
+from markitdown._stream_info import StreamInfo
 from playwright.async_api import Page
 
 from .redaction import redact_secrets
 
 MAX_CONTENT_LENGTH = 50000
 
+_readability_js: str | None = None
+_markitdown: MarkItDown | None = None
 
-async def extract_markdown_view(page: Page) -> AsyncIterator[dict[str, Any]]:
-    """Extract readable content as markdown."""
 
-    # Get main content, excluding navigation/chrome
-    html = await page.evaluate(
-        """
-        () => {
-            // Try semantic main content first
-            const main = document.querySelector('main, article, [role="main"], .content, #content');
-            if (main) return main.innerHTML;
+def _get_readability_js() -> str:
+    """Load vendored Readability.js (cached)."""
+    global _readability_js
+    if _readability_js is None:
+        js_path = files("webctl.views") / "vendor" / "Readability.js"
+        _readability_js = js_path.read_text(encoding="utf-8")
+    return _readability_js
 
-            // Fallback: body minus nav/footer/aside/scripts
-            const body = document.body.cloneNode(true);
-            const remove = ['nav', 'footer', 'aside', 'script', 'style', 'noscript',
-                           '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
-                           'header', '.nav', '.navigation', '.sidebar'];
-            remove.forEach(sel => {
-                body.querySelectorAll(sel).forEach(el => el.remove());
-            });
-            return body.innerHTML;
-        }
-    """
+
+def _get_markitdown() -> MarkItDown:
+    """Get cached MarkItDown instance."""
+    global _markitdown
+    if _markitdown is None:
+        _markitdown = MarkItDown()
+    return _markitdown
+
+
+async def _extract_readability(page: Page) -> str | None:
+    """Try Readability.js extraction. Returns HTML or None."""
+    js = _get_readability_js()
+    result = await page.evaluate(
+        """([js]) => {
+            try {
+                const script = new Function(js + '; return Readability;');
+                const Readability = script();
+                const doc = document.cloneNode(true);
+                const article = new Readability(doc).parse();
+                return article ? article.content : null;
+            } catch(e) {
+                return null;
+            }
+        }""",
+        [js],
     )
+    return result
 
-    # Convert to markdown
-    md = markdownify(
-        html,
-        heading_style="ATX",
-        strip=["script", "style", "noscript"],
-        escape_asterisks=False,
-        escape_underscores=False,
-    )
+
+def _html_to_markdown(html: str) -> str:
+    """Convert HTML to markdown using MarkItDown."""
+    mid = _get_markitdown()
+    stream = io.BytesIO(html.encode("utf-8"))
+    result = mid.convert(stream, stream_info=StreamInfo(extension=".html"))
+    md = result.text_content or ""
 
     # Clean up excessive whitespace
     md = re.sub(r"\n{3,}", "\n\n", md)
     md = re.sub(r" +", " ", md)
     md = md.strip()
+    return md
+
+
+async def extract_markdown_view(page: Page) -> AsyncIterator[dict[str, Any]]:
+    """Extract readable content as markdown."""
+
+    # Try Readability.js first (best for articles).
+    # Fall back to full page content + MarkItDown (handles everything else).
+    html = await _extract_readability(page)
+    if not html:
+        html = await page.content()
+
+    md = _html_to_markdown(html)
 
     # Truncate if needed
     truncated = False

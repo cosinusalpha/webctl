@@ -40,6 +40,9 @@ class WebctlConfig:
     browser_executable_path: str | None = None  # Override to use a custom Chromium
     use_global_playwright: bool = False  # Allow global Playwright even if version mismatches
 
+    # Mobile emulation (unattended mode)
+    mobile_emulation: bool = True  # Use mobile device profile in unattended mode
+
     # Proxy settings
     proxy_server: str | None = None  # e.g., "http://proxy:8080"
     proxy_username: str | None = None  # optional auth
@@ -74,6 +77,7 @@ class WebctlConfig:
             default_session=data.get("default_session", "default"),
             default_mode=data.get("default_mode", "attended"),
             domain_policy=PolicyConfig.from_dict(data.get("domain_policy", {})),
+            mobile_emulation=data.get("mobile_emulation", True),
             a11y_include_bbox=data.get("a11y_include_bbox", False),
             a11y_include_path_hint=data.get("a11y_include_path_hint", True),
             screenshot_on_error=data.get("screenshot_on_error", False),
@@ -106,6 +110,7 @@ class WebctlConfig:
                     "deny": self.domain_policy.policy.deny_patterns,
                 },
             },
+            "mobile_emulation": self.mobile_emulation,
             "a11y_include_bbox": self.a11y_include_bbox,
             "a11y_include_path_hint": self.a11y_include_path_hint,
             "screenshot_on_error": self.screenshot_on_error,

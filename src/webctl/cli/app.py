@@ -1906,6 +1906,7 @@ def cmd_config_show() -> None:
         f"  browser_executable_path: {config.browser_executable_path or 'unset (managed Playwright)'}"
     )
     print(f"  use_global_playwright: {config.use_global_playwright}")
+    print(f"  mobile_emulation: {config.mobile_emulation}")
     print(f"  proxy_server: {config.proxy_server or 'unset'}")
     print(f"  proxy_username: {config.proxy_username or 'unset'}")
     # Mask password for security
@@ -1934,6 +1935,7 @@ def cmd_config_get(
         "screenshot_error_dir",
         "browser_executable_path",
         "use_global_playwright",
+        "mobile_emulation",
         "proxy_server",
         "proxy_username",
         "proxy_password",
@@ -1970,6 +1972,7 @@ def cmd_config_set(
         "a11y_include_path_hint",
         "screenshot_on_error",
         "use_global_playwright",
+        "mobile_emulation",
     ]
     int_keys = ["idle_timeout"]
     nullable_str_keys = [
@@ -2009,6 +2012,7 @@ def cmd_config_set(
         "screenshot_error_dir",
         "browser_executable_path",
         "use_global_playwright",
+        "mobile_emulation",
         "proxy_server",
         "proxy_username",
         "proxy_password",
