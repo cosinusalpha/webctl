@@ -1,0 +1,19 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "webctl",
+  "description": "Stateful browser automation CLI for AI agents",
+  "owner": {
+    "name": "cosinusalpha",
+    "email": "42695699+cosinusalpha@users.noreply.github.com"
+  },
+  "plugins": [
+    {
+      "name": "webctl",
+      "description": "Browser automation for web testing, form filling, screenshots, and data extraction via CLI",
+      "source": "./",
+      "strict": false,
+      "skills": ["./skills/webctl"],
+      "category": "development"
+    }
+  ]
+}

@@ -57,6 +57,9 @@ build-backend = "hatchling.build"
 packages = ["src/webctl"]
 artifacts = ["src/webctl/views/vendor/*.js"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "webctl/skills"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

@@ -47,14 +47,26 @@ Beyond filtering, CLI gives you:
 
 ## Agent Integration
 
-**Step 1: Install**
+**Step 1: Install the skill**
+
+For Claude Code (recommended — no pip install needed first):
+
+```bash
+npx skills add cosinusalpha/webctl
+```
+
+This works across Claude Code, Cursor, Codex, Gemini CLI, Copilot, Goose, Windsurf, and OpenCode.
+
+**Step 1 (alternative): Install via pip**
 
 ```bash
 pip install webctl
 webctl setup  # Downloads Chromium
 ```
 
-**Step 2: Generate Skills/Prompts**
+**Step 2: Generate Skills/Prompts (pip install only)**
+
+If you installed via pip, generate agent config files:
 
 ```bash
 webctl init              # Project-level (recommended)
@@ -313,6 +325,35 @@ Check and clear settings:
 webctl config show              # View all settings
 webctl config set proxy_server null   # Clear proxy
 ```
+
+### Domain Policy
+
+Restrict which domains the browser can navigate to. Edit your config file directly
+(`webctl config show` to find the path):
+
+```json
+{
+  "domain_policy": {
+    "enabled": true,
+    "policy": {
+      "mode": "allow",
+      "allow": ["localhost", "*.mycompany.com", "github.com"],
+      "deny": []
+    }
+  }
+}
+```
+
+**Modes:**
+
+| Mode | Behavior |
+|------|----------|
+| `allow` | Whitelist — only listed domains are permitted |
+| `deny` | Blacklist — all domains except listed ones are permitted |
+| `both` | Allow list checked first, then deny list |
+
+Domain patterns support glob wildcards (e.g., `*.example.com`). A built-in default deny list
+blocks known malicious patterns regardless of mode.
 
 ### Container Deployment
 
