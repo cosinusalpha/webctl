@@ -128,9 +128,15 @@ async def ensure_daemon(session_id: str) -> bool:
 
 async def run_command(command: str, args: dict[str, Any]) -> None:
     """Run a command against the daemon."""
+    log_path = os.environ.get("WEBCTL_LOG")
+    log_file = open(log_path, "a") if log_path else None  # noqa: SIM115
     formatter = OutputFormatter(
-        format=_format, quiet=_quiet, result_only=_result_only, force=_force
+        format=_format, quiet=_quiet, result_only=_result_only, force=_force,
+        log_file=log_file,
     )
+
+    if log_file:
+        log_file.write(f"$ {' '.join(sys.argv)}\n")
 
     if not await ensure_daemon(_session):
         raise typer.Exit(1)
@@ -153,6 +159,9 @@ async def run_command(command: str, args: dict[str, Any]) -> None:
         print_error(f"Connection failed: {e}")
         raise typer.Exit(1) from None
     finally:
+        if log_file:
+            log_file.write("\n")
+            log_file.close()
         await client.close()
 
 

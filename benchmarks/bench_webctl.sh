@@ -26,10 +26,15 @@ echo "=== webctl benchmark: $TASK_NAME ==="
 echo "Task: $TASK_PROMPT"
 echo ""
 
-# Ensure webctl daemon is running
-uv run --project "$PROJECT_DIR" webctl start -q 2>/dev/null || true
+# Clean slate: stop any existing session/daemon
+uv run --project "$PROJECT_DIR" webctl stop 2>/dev/null || true
+sleep 0.5
 
 WEBCTL="uv run --project $PROJECT_DIR webctl"
+
+# Enable command logging if not already set
+export WEBCTL_LOG="${WEBCTL_LOG:-$OUT_DIR/webctl_${TASK_NAME}.log}"
+> "$WEBCTL_LOG"  # truncate
 
 RESULT=$(claude -p \
   --output-format json \
