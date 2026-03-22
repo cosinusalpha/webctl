@@ -240,6 +240,59 @@ CHECKABLE_ROLES = frozenset({"checkbox", "radio", "switch"})
 from ...views.filters import INTERACTIVE_ROLES
 
 
+async def resolve_searchbox(page: Page) -> ResolveSuccess | ResolveError:
+    """Find a search box by ARIA role/landmark, language-independent.
+
+    Resolution order:
+    1. Unique role=searchbox on the page
+    2. textbox/combobox/searchbox inside a search landmark
+    3. Fall back to text-based matching for "Search"
+    """
+    from ...views.a11y import parse_aria_snapshot
+
+    try:
+        snapshot_str = await page.locator("body").aria_snapshot()
+    except Exception as e:
+        return ResolveError(
+            code="snapshot_failed",
+            message=f"Failed to get page snapshot: {e}",
+            suggestions=["Try waiting for the page to load"],
+        )
+
+    if not snapshot_str:
+        return ResolveError(
+            code="empty_snapshot",
+            message="Page snapshot is empty",
+            suggestions=["The page may still be loading"],
+        )
+
+    items = parse_aria_snapshot(snapshot_str)
+
+    # 1. Unique searchbox role
+    searchboxes = [i for i in items if i.get("role") == "searchbox"]
+    if len(searchboxes) == 1:
+        return ResolveSuccess(element=searchboxes[0])
+
+    # 2. Typeable element inside a search landmark
+    search_landmark_depth: int | None = None
+    for i in items:
+        if i.get("role") == "search":
+            search_landmark_depth = i.get("_depth", 0)
+            continue
+        if search_landmark_depth is not None:
+            # Still inside the search landmark (deeper depth)
+            if i.get("_depth", 0) <= search_landmark_depth:
+                search_landmark_depth = None  # exited the landmark
+                continue
+            if i.get("role") in TYPEABLE_ROLES:
+                return ResolveSuccess(element=i)
+
+    # 3. Fall back to text-based matching
+    return await resolve_by_description(
+        page, "Search", frozenset({"searchbox", "textbox", "combobox"})
+    )
+
+
 def _is_query_syntax(target: str) -> bool:
     """Check if target looks like query syntax (role=X, name=Y, etc.)."""
     return bool(re.search(r"\b(role|name|text|id)([~]?=)", target))

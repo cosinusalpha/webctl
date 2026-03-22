@@ -80,8 +80,119 @@ def _html_to_markdown(html: str) -> str:
     return md
 
 
+_STRUCTURED_DATA_JS = """
+(() => {
+    const result = { jsonLd: [], og: {}, meta: {} };
+    document.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
+        try { result.jsonLd.push(JSON.parse(s.textContent)); } catch(e) {}
+    });
+    document.querySelectorAll('meta[property^="og:"]').forEach(m => {
+        const prop = m.getAttribute('property');
+        if (prop && m.content) result.og[prop] = m.content;
+    });
+    ['description', 'keywords', 'author'].forEach(n => {
+        const m = document.querySelector('meta[name="' + n + '"]');
+        if (m && m.content) result.meta[n] = m.content;
+    });
+    return result;
+})()
+"""
+
+
+async def _extract_structured_data(page: Page) -> str:
+    """Extract JSON-LD, Open Graph, and meta tags. Returns formatted markdown or empty string."""
+    import json
+
+    try:
+        raw = await page.evaluate(_STRUCTURED_DATA_JS)
+    except Exception:
+        return ""
+
+    if not raw:
+        return ""
+
+    lines: list[str] = []
+
+    # Process JSON-LD — flatten nested @graph structures
+    for entry in raw.get("jsonLd", []):
+        items_to_process = [entry]
+        if "@graph" in entry:
+            items_to_process = entry["@graph"]
+
+        for item in items_to_process:
+            ld_type = item.get("@type", "")
+            if isinstance(ld_type, list):
+                ld_type = ld_type[0] if ld_type else ""
+
+            if ld_type in ("Product", "SoftwareApplication", "Book", "Movie", "MusicAlbum"):
+                lines.append(f"- **{ld_type}**: {item.get('name', 'N/A')}")
+                if item.get("description"):
+                    desc = item["description"][:200]
+                    lines.append(f"- Description: {desc}")
+                if item.get("brand"):
+                    brand = item["brand"]
+                    if isinstance(brand, dict):
+                        brand = brand.get("name", str(brand))
+                    lines.append(f"- Brand: {brand}")
+
+                # Price from offers
+                offers = item.get("offers", {})
+                if isinstance(offers, list):
+                    offers = offers[0] if offers else {}
+                price = offers.get("price") or offers.get("lowPrice")
+                currency = offers.get("priceCurrency", "")
+                if price:
+                    lines.append(f"- **Price: {price} {currency}**")
+                avail = offers.get("availability", "")
+                if avail:
+                    avail = avail.rsplit("/", 1)[-1]  # schema.org/InStock → InStock
+                    lines.append(f"- Availability: {avail}")
+
+                # Rating
+                rating = item.get("aggregateRating", {})
+                if rating:
+                    val = rating.get("ratingValue", "")
+                    count = rating.get("reviewCount") or rating.get("ratingCount", "")
+                    if val:
+                        lines.append(f"- Rating: {val}/5 ({count} reviews)")
+
+            elif ld_type == "BreadcrumbList":
+                crumbs = item.get("itemListElement", [])
+                if crumbs:
+                    path = " > ".join(
+                        c.get("item", {}).get("name", c.get("name", ""))
+                        for c in sorted(crumbs, key=lambda c: c.get("position", 0))
+                        if c.get("item", {}).get("name") or c.get("name")
+                    )
+                    if path:
+                        lines.append(f"- Category: {path}")
+
+    # Open Graph fallback (if JSON-LD didn't give us key info)
+    og = raw.get("og", {})
+    if og and not any("Price:" in l for l in lines):
+        if og.get("og:price:amount"):
+            currency = og.get("og:price:currency", "")
+            lines.append(f"- **Price: {og['og:price:amount']} {currency}**")
+    if og.get("og:description") and not any("Description:" in l for l in lines):
+        desc = og["og:description"][:200]
+        lines.append(f"- Description: {desc}")
+
+    # Meta description fallback
+    meta = raw.get("meta", {})
+    if meta.get("description") and not any("Description:" in l for l in lines):
+        lines.append(f"- Description: {meta['description'][:200]}")
+
+    if not lines:
+        return ""
+
+    return "## Page Info (structured data)\n" + "\n".join(lines) + "\n\n"
+
+
 async def extract_markdown_view(page: Page) -> AsyncIterator[dict[str, Any]]:
     """Extract readable content as markdown."""
+
+    # Extract structured data (JSON-LD, Open Graph, meta)
+    structured = await _extract_structured_data(page)
 
     # Try Readability.js first (best for articles).
     # Fall back to full page content + MarkItDown (handles everything else).
@@ -90,6 +201,10 @@ async def extract_markdown_view(page: Page) -> AsyncIterator[dict[str, Any]]:
         html = await page.content()
 
     md = _html_to_markdown(html)
+
+    # Prepend structured data
+    if structured:
+        md = structured + md
 
     # Truncate if needed
     truncated = False

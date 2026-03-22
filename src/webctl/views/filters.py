@@ -167,6 +167,199 @@ def filter_a11y_items(
         yield item
 
 
+# --- Landmark-aware filtering for smart navigate snapshots ---
+
+# Landmarks shown fully expanded
+_EXPAND_LANDMARKS = frozenset({"main"})
+# Landmarks shown with interactive children only (compact)
+_COMPACT_LANDMARKS = frozenset({"search", "form"})
+# Landmarks collapsed to just the landmark + count
+_COLLAPSE_LANDMARKS = frozenset({"banner", "navigation", "complementary", "region"})
+# Landmarks hidden entirely
+_HIDE_LANDMARKS = frozenset({"contentinfo"})
+# Roles that always surface first (blocking UI)
+_PRIORITY_ROLES = frozenset({"dialog", "alertdialog", "alert"})
+
+
+def landmark_aware_filter(items: list[dict[str, Any]], allowed_roles: frozenset[str] | None = None) -> list[dict[str, Any]]:
+    """Filter items by landmark context for a smart navigate snapshot.
+
+    Priority order in output:
+    1. dialog/alertdialog/alert (blocking UI)
+    2. search landmark (compact — interactive children only)
+    3. main landmark (fully expanded)
+    4. form outside main (compact)
+    5. banner/navigation/complementary/region (collapsed — landmark + count)
+    6. contentinfo — hidden
+
+    If no main landmark exists, returns all items (with allowed_roles filter).
+    """
+    if not items:
+        return items
+
+    if allowed_roles is None:
+        allowed_roles = NAVIGATE_ROLES
+
+    # Always partition by landmark context — even without a "main" landmark,
+    # we still benefit from collapsing banner/navigation/complementary and
+    # extracting search. Orphan items (not inside any landmark) serve as the
+    # primary content when no "main" exists.
+
+    # Pre-compute: large dialogs (>20 children) are content panels, not blocking modals —
+    # collapse them like complementary/region instead of expanding as priority
+    _LARGE_DIALOG_THRESHOLD = 20
+    large_dialog_indices: set[int] = set()
+    for idx, item in enumerate(items):
+        if item.get("role") in _PRIORITY_ROLES:
+            d_depth = item.get("_depth", 0)
+            count = 0
+            for j in range(idx + 1, len(items)):
+                if items[j].get("_depth", 0) <= d_depth:
+                    break
+                count += 1
+            if count > _LARGE_DIALOG_THRESHOLD:
+                large_dialog_indices.add(idx)
+
+    # Partition items by landmark context
+    priority_items: list[dict[str, Any]] = []  # dialog/alert (small, blocking)
+    search_items: list[dict[str, Any]] = []
+    main_items: list[dict[str, Any]] = []
+    compact_items: list[dict[str, Any]] = []  # form outside main
+    collapsed_landmarks: list[dict[str, Any]] = []  # banner/nav/complementary — just landmarks
+    orphan_items: list[dict[str, Any]] = []  # items not inside any landmark
+
+    current_landmark: str | None = None
+    landmark_depth: int = -1
+    current_collapsed_id: int | None = None  # id() of the active collapsed landmark
+    child_count: dict[int, int] = {}  # id(landmark_item) -> count of children
+
+    for idx, item in enumerate(items):
+        depth = item.get("_depth", 0)
+        role = item.get("role", "")
+
+        # Detect landmark boundaries — always switch context for any landmark/priority role,
+        # even when nested (e.g., search inside banner), so sub-landmarks get proper treatment
+        if role in LANDMARK_ROLES or role in _PRIORITY_ROLES:
+            current_landmark = role
+            landmark_depth = depth
+            current_collapsed_id = None
+
+            if role in _PRIORITY_ROLES and idx not in large_dialog_indices:
+                priority_items.append(item)
+            elif role in _PRIORITY_ROLES:
+                # Large dialog/alert — collapse like complementary
+                collapsed_landmarks.append(item)
+                child_count[id(item)] = 0
+                current_collapsed_id = id(item)
+                current_landmark = "complementary"  # route children to collapse
+            elif role == "search":
+                search_items.append(item)
+            elif role == "main":
+                main_items.append(item)
+            elif role in _COMPACT_LANDMARKS:
+                compact_items.append(item)
+            elif role in _COLLAPSE_LANDMARKS:
+                collapsed_landmarks.append(item)
+                child_count[id(item)] = 0
+                current_collapsed_id = id(item)
+            # contentinfo: skip entirely
+            continue
+
+        # Check if we've exited the current landmark
+        if current_landmark is not None and depth <= landmark_depth and role not in LANDMARK_ROLES and role not in _PRIORITY_ROLES:
+            current_landmark = None
+            landmark_depth = -1
+            current_collapsed_id = None
+
+        # Route item based on current landmark context
+        if current_landmark is None:
+            # Orphan — not inside any landmark
+            if role in allowed_roles:
+                orphan_items.append(item)
+        elif current_landmark in _PRIORITY_ROLES:
+            if role in allowed_roles:
+                priority_items.append(item)
+        elif current_landmark == "search":
+            if role in INTERACTIVE_ROLES:
+                search_items.append(item)
+        elif current_landmark == "main":
+            if role in allowed_roles:
+                main_items.append(item)
+        elif current_landmark in _COMPACT_LANDMARKS:
+            if role in INTERACTIVE_ROLES:
+                compact_items.append(item)
+        elif current_landmark in _COLLAPSE_LANDMARKS and current_collapsed_id is not None:
+            child_count[current_collapsed_id] += 1
+        # contentinfo children: skip
+
+    # Annotate collapsed landmarks with child count
+    for lm in collapsed_landmarks:
+        count = child_count.get(id(lm), 0)
+        if count > 0:
+            name = lm.get("name", "")
+            lm["name"] = f"{name} ({count} items)" if name else f"({count} items)"
+
+    return priority_items + search_items + main_items + compact_items + collapsed_landmarks + orphan_items
+
+
+# Roles whose children should be collapsed when there are too many
+COLLAPSIBLE_CONTAINER_ROLES = frozenset({"combobox", "listbox", "menu", "menubar", "tree"})
+COLLAPSIBLE_CHILD_ROLES = frozenset({"option", "menuitem", "treeitem"})
+
+
+def collapse_containers(items: list[dict[str, Any]], threshold: int = 5) -> list[dict[str, Any]]:
+    """Collapse children of combobox/listbox/menu/tree when count exceeds threshold.
+
+    Keeps the first 3 children for context, drops the rest, and annotates
+    the parent with the total count (e.g., "(52 options)").
+    """
+    if not items:
+        return items
+
+    result: list[dict[str, Any]] = []
+    # Track active container: (depth, child_count, result_index)
+    container_stack: list[tuple[int, int, int]] = []
+
+    for item in items:
+        depth = item.get("_depth", 0)
+        role = item.get("role", "")
+
+        # Pop containers we've exited (depth <= container depth)
+        while container_stack and depth <= container_stack[-1][0]:
+            c_depth, c_count, c_idx = container_stack.pop()
+            if c_count > threshold:
+                parent = result[c_idx]
+                name = parent.get("name", "")
+                parent["name"] = f"{name} ({c_count} items)" if name else f"({c_count} items)"
+
+        if role in COLLAPSIBLE_CONTAINER_ROLES:
+            container_stack.append((depth, 0, len(result)))
+            result.append(item)
+            continue
+
+        if container_stack and role in COLLAPSIBLE_CHILD_ROLES:
+            # Increment child count on innermost container
+            c_depth, c_count, c_idx = container_stack[-1]
+            c_count += 1
+            container_stack[-1] = (c_depth, c_count, c_idx)
+
+            if c_count <= 3:
+                result.append(item)  # keep first 3
+            # else: skip (collapsed)
+            continue
+
+        result.append(item)
+
+    # Finalize any remaining open containers
+    for c_depth, c_count, c_idx in container_stack:
+        if c_count > threshold:
+            parent = result[c_idx]
+            name = parent.get("name", "")
+            parent["name"] = f"{name} ({c_count} items)" if name else f"({c_count} items)"
+
+    return result
+
+
 def parse_roles_string(roles_str: str) -> set[str]:
     """Parse comma-separated roles string into a set."""
     if not roles_str:

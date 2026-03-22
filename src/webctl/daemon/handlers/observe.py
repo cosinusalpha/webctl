@@ -66,8 +66,6 @@ async def handle_snapshot(
     # --read mode: return markdown content
     if read_mode:
         try:
-            from ...views.markdown import extract_markdown_view
-
             async for item in extract_markdown_view(page):
                 item["req_id"] = request.req_id
                 yield ItemResponse(req_id=request.req_id, view="md", data=item)
