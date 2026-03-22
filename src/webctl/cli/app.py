@@ -403,10 +403,9 @@ def cmd_setup(
         print_success("webctl is ready to use!")
         console.print()
         console.print("Try it out:")
-        console.print("  webctl start")
         console.print('  webctl navigate "https://example.com"')
-        console.print("  webctl snapshot --interactive-only")
-        console.print("  webctl stop --daemon")
+        console.print("  webctl click @e1")
+        console.print("  webctl stop")
     else:
         print_error("Failed to install browser")
         console.print()
@@ -482,28 +481,25 @@ def cmd_doctor() -> None:
 # These are always in context, so they must be ~25 lines
 AGENT_PROMPT = """# webctl - Browser Control
 
-Start: `webctl start` | End: `webctl stop --daemon`
+Navigate: `webctl navigate "url"` (auto-starts session) | End: `webctl stop`
 
 ## Quick Reference
-- `webctl snapshot --count` - Just element counts (zero context)
-- `webctl snapshot --interactive-only` - See clickable elements
-- `webctl snapshot --show-query` - Show query for each element
-- `webctl click 'role=button name~="Text"'` - Click
-- `webctl click '...' --retry 3 --wait network-idle` - Reliable click
-- `webctl type 'role=textbox name~="Field"' "value" --submit` - Type + Enter
-- `webctl fill-form '{"Email": "x@y.com", "Password": "***"}'` - Bulk fill
-- `webctl status --brief` - Quick page state check
+- `webctl navigate "url"` - Go to URL (returns snapshot with @refs)
+- `webctl navigate "url" --read` - Get readable text content
+- `webctl navigate "url" --search "query"` - Search on page
+- `webctl snapshot` - Re-scan page (returns @refs)
+- `webctl snapshot --interactive-only` - Just buttons/links/inputs
+- `webctl click @e3` or `webctl click "Submit"` - Click by @ref or text
+- `webctl click "Submit" --snapshot` - Click + return new page state
+- `webctl type @e2 "text"` or `webctl type "Email" "text"` - Type by @ref or text
+- `webctl type "Country" "Germany"` - Auto-selects from dropdown
+- `webctl do '[["type","Email","x@y.com"],["type","Password","***"],["click","Log in"]]' --snapshot`
+- `webctl press Enter` | `webctl scroll down` | `webctl wait network-idle`
 
-## Query Syntax
-Quote: `'role=button name~="Text"'` (single outside, double for name)
-- `name~="text"` - Contains (PREFERRED)
-- `name="text"` - Exact match (brittle)
-
-## Reduce Output
-- `--count` - Just counts (zero context cost)
-- `--interactive-only` - Only buttons/links/inputs
-- `--grep "pattern"` - Filter by regex
-- `--within "role=main"` - Scope to area
+## Target Syntax (for click/type)
+- `@e3` - Element ref from snapshot (fastest)
+- `"Submit"` - Find by text description (auto-matched)
+- `'role=button name~="Text"'` - Full query syntax (fallback)
 
 Run `webctl --help` for more.
 """
@@ -884,11 +880,13 @@ def cmd_start(
 
 @app.command("stop")
 def cmd_stop(
-    daemon: bool = typer.Option(False, "--daemon", "-d", help="Also shutdown the daemon process"),
+    keep_daemon: bool = typer.Option(
+        False, "--keep-daemon", help="Keep daemon running (only close browser)"
+    ),
 ) -> None:
-    """Stop the browser session (and optionally the daemon)."""
+    """Stop the browser session and daemon (default: closes everything)."""
     asyncio.run(run_command("session.stop", {"session": _session}))
-    if daemon:
+    if not keep_daemon:
         asyncio.run(run_command("daemon.shutdown", {}))
 
 
@@ -950,10 +948,31 @@ def cmd_navigate(
     wait_until: str = typer.Option(
         "load", "--wait", "-w", help="Wait condition: load, domcontentloaded, networkidle"
     ),
+    read: bool = typer.Option(
+        False, "--read", help="Return readable text content instead of a11y snapshot"
+    ),
+    search: str | None = typer.Option(
+        None, "--search", help="Find search box, type query, submit, return results"
+    ),
 ) -> None:
-    """Navigate to a URL."""
+    """Navigate to a URL. Auto-starts session. Returns snapshot with @refs.
+
+    Examples:
+        webctl navigate "https://example.com"
+        webctl navigate "https://example.com" --read
+        webctl navigate "https://duckduckgo.com" --search "webctl"
+    """
     asyncio.run(
-        run_command("navigate", {"url": url, "wait_until": wait_until, "session": _session})
+        run_command(
+            "navigate",
+            {
+                "url": url,
+                "wait_until": wait_until,
+                "read": read,
+                "search": search,
+                "session": _session,
+            },
+        )
     )
 
 
@@ -1018,19 +1037,20 @@ def cmd_snapshot(
     count_only: bool = typer.Option(
         False, "--count", "-c", help="Only output element counts, no elements (zero context cost)"
     ),
+    read: bool = typer.Option(
+        False, "--read", help="Return readable text content (markdown) instead of a11y tree"
+    ),
 ) -> None:
-    """Take a snapshot of the current page.
+    """Take a snapshot of the current page. Returns @refs by default.
 
-    Output is compact by default with a summary header. On large pages (>200 elements),
-    it shows a preview. Use --force to see all elements.
+    Default shows all elements with @refs. Use --interactive-only for just interactive.
 
     Examples:
-        webctl snapshot                          # Compact output
+        webctl snapshot                          # All elements with @refs
+        webctl snapshot --interactive-only       # Only buttons/links/inputs with @refs
+        webctl snapshot --read                   # Readable text content
         webctl snapshot --count                  # Just counts (zero context)
-        webctl snapshot --show-query             # Include query for each element
-        webctl snapshot --interactive-only       # Only buttons/links/inputs
         webctl snapshot --grep "button|submit"   # Filter by pattern
-        webctl snapshot --force                  # Full output even if large
     """
     asyncio.run(
         run_command(
@@ -1050,6 +1070,8 @@ def cmd_snapshot(
                 "visible_only": visible_only,
                 "show_query": show_query,
                 "count_only": count_only,
+                "compact_refs": True,
+                "read": read,
                 "session": _session,
             },
         )
@@ -1094,7 +1116,7 @@ def cmd_query(
 
 @app.command("click")
 def cmd_click(
-    query: str = typer.Argument(..., help="Query to find element"),
+    query: str = typer.Argument(..., help="Element: @ref, 'role=X name~=Y', or text description"),
     retry: int = typer.Option(0, "--retry", "-R", help="Number of retries on failure"),
     retry_delay: int = typer.Option(1000, "--retry-delay", help="Delay between retries in ms"),
     wait_after: str | None = typer.Option(
@@ -1103,13 +1125,17 @@ def cmd_click(
         "-w",
         help="Wait condition after click (e.g., 'network-idle', 'exists:role=dialog')",
     ),
+    snapshot: bool = typer.Option(
+        False, "--snapshot", "-S", help="Return page snapshot after action"
+    ),
 ) -> None:
-    """Click an element.
+    """Click an element. Accepts @ref, query, or text description.
 
     Examples:
-        webctl click 'role=button name~="Submit"'
-        webctl click 'role=button name~="Submit"' --retry 3
-        webctl click 'role=button name~="Submit"' --wait network-idle
+        webctl click @e3
+        webctl click "Submit"
+        webctl click 'role=button name~="Submit"' --snapshot
+        webctl click "Submit" --wait network-idle
     """
     asyncio.run(
         run_command(
@@ -1119,6 +1145,7 @@ def cmd_click(
                 "retry": retry,
                 "retry_delay": retry_delay,
                 "wait_after": wait_after,
+                "snapshot_after": snapshot,
                 "session": _session,
             },
         )
@@ -1127,8 +1154,8 @@ def cmd_click(
 
 @app.command("type")
 def cmd_type(
-    query: str = typer.Argument(..., help="Query to find element"),
-    text: str = typer.Argument(..., help="Text to type"),
+    query: str = typer.Argument(..., help="Element: @ref, 'role=X name~=Y', or text description"),
+    text: str = typer.Argument(..., help="Text to type (or option label for dropdowns)"),
     clear: bool = typer.Option(False, "--clear", "-c", help="Clear field first"),
     submit: bool = typer.Option(False, "--submit", help="Press Enter after typing"),
     retry: int = typer.Option(0, "--retry", "-R", help="Number of retries on failure"),
@@ -1136,13 +1163,17 @@ def cmd_type(
     wait_after: str | None = typer.Option(
         None, "--wait", "-w", help="Wait condition after typing (e.g., 'network-idle')"
     ),
+    snapshot: bool = typer.Option(
+        False, "--snapshot", "-S", help="Return page snapshot after action"
+    ),
 ) -> None:
-    """Type text into an element.
+    """Type text into an element. Auto-detects dropdowns and checkboxes.
 
     Examples:
-        webctl type 'role=textbox name~="Email"' "user@example.com"
-        webctl type 'role=textbox name~="Search"' "query" --submit
-        webctl type 'role=textbox name~="Search"' "query" --submit --wait network-idle
+        webctl type @e2 "user@example.com"
+        webctl type "Email" "user@example.com"
+        webctl type "Country" "Germany"          # auto-selects from dropdown
+        webctl type "Search" "query" --submit --snapshot
     """
     asyncio.run(
         run_command(
@@ -1155,6 +1186,7 @@ def cmd_type(
                 "retry": retry,
                 "retry_delay": retry_delay,
                 "wait_after": wait_after,
+                "snapshot_after": snapshot,
                 "session": _session,
             },
         )
@@ -1166,12 +1198,21 @@ def cmd_scroll(
     direction: str = typer.Argument("down", help="Direction: up, down"),
     amount: int = typer.Option(300, "--amount", "-a", help="Scroll amount in pixels"),
     query: str | None = typer.Option(None, "--to", "-t", help="Scroll element into view"),
+    snapshot: bool = typer.Option(
+        False, "--snapshot", "-S", help="Return page snapshot after scrolling"
+    ),
 ) -> None:
     """Scroll the page."""
     asyncio.run(
         run_command(
             "scroll",
-            {"direction": direction, "amount": amount, "query": query, "session": _session},
+            {
+                "direction": direction,
+                "amount": amount,
+                "query": query,
+                "snapshot_after": snapshot,
+                "session": _session,
+            },
         )
     )
 
@@ -1179,9 +1220,14 @@ def cmd_scroll(
 @app.command("press")
 def cmd_press(
     key: str = typer.Argument(..., help="Key to press (e.g., Enter, Tab, Escape)"),
+    snapshot: bool = typer.Option(
+        False, "--snapshot", "-S", help="Return page snapshot after key press"
+    ),
 ) -> None:
     """Press a key."""
-    asyncio.run(run_command("press", {"key": key, "session": _session}))
+    asyncio.run(
+        run_command("press", {"key": key, "snapshot_after": snapshot, "session": _session})
+    )
 
 
 @app.command("select")
@@ -1265,6 +1311,44 @@ def cmd_fill_form(
         run_command(
             "fill-form",
             {"fields": fields, "within": within, "session": _session},
+        )
+    )
+
+
+@app.command("do")
+def cmd_do(
+    actions_json: str = typer.Argument(
+        ..., help='JSON array of actions: [["click","Submit"],["type","Email","user@test.com"]]'
+    ),
+    snapshot: bool = typer.Option(
+        False, "--snapshot", "-S", help="Return page snapshot after all actions"
+    ),
+) -> None:
+    """Execute multiple actions in one call.
+
+    Actions are a JSON array of [action, target, value?] tuples.
+    Supported actions: click, type, press, scroll, wait.
+
+    Examples:
+        webctl do '[["type","Email","user@test.com"],["type","Password","secret"],["click","Log in"]]'
+        webctl do '[["type","Search","query"],["press","Enter"]]' --snapshot
+    """
+    import json
+
+    try:
+        actions = json.loads(actions_json)
+    except json.JSONDecodeError as e:
+        print_error(f"Invalid JSON: {e}")
+        raise typer.Exit(1) from None
+
+    if not isinstance(actions, list):
+        print_error("Actions must be a JSON array")
+        raise typer.Exit(1)
+
+    asyncio.run(
+        run_command(
+            "do",
+            {"actions": actions, "snapshot_after": snapshot, "session": _session},
         )
     )
 

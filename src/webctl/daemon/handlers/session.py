@@ -7,6 +7,7 @@ from collections import Counter
 from collections.abc import AsyncIterator
 from typing import Any
 
+from ...config import WebctlConfig
 from ...protocol.messages import DoneResponse, ErrorResponse, ItemResponse, Request, Response
 from ..session_manager import SessionManager
 from .registry import register
@@ -28,8 +29,11 @@ async def handle_session_start(
         )
         return
 
+    cfg = WebctlConfig.load()
+    policy = cfg.domain_policy.policy if cfg.domain_policy.enabled else None
+
     try:
-        session = await session_manager.create_session(session_id, mode=mode)
+        session = await session_manager.create_session(session_id, mode=mode, domain_policy=policy)
         yield DoneResponse(
             req_id=request.req_id,
             ok=True,

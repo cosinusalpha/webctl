@@ -9,10 +9,8 @@ pip install webctl
 # 2. Auto-configure your agent (creates skills/prompts for all supported agents)
 webctl init
 
-# 3. Start browsing
-webctl start
+# 3. Start browsing (auto-starts session)
 webctl navigate "https://google.com"
-webctl snapshot --interactive-only
 ```
 
 **`webctl init` automatically generates the skills and prompts your agents need to drive the browser.**
@@ -42,6 +40,38 @@ Beyond filtering, CLI gives you:
 | **Cache & Cost**   | `webctl snapshot > cache.txt` | Every call hits server |
 | **Script**         | Save to .sh, version control  | Ephemeral              |
 | **Human takeover** | Same commands                 | Different interface    |
+
+---
+
+## Benchmarks
+
+Head-to-head comparison of **webctl** vs **[agent-browser](https://github.com/AXyLo/agent-browser)** (Vercel's Playwright MCP tool) across 4 real-world web tasks. Both tools use Claude Opus as the driving agent.
+
+| Task                    |  webctl  |        |          | agent-browser |       |        |
+|-------------------------|:--------:|:------:|:--------:|:-------------:|:-----:|:------:|
+|                         |  Score   | Turns  |  Tokens  |     Score     | Turns | Tokens |
+| Amazon product lookup   | **9**/10 |   28   |   646k   |   **9**/10    |  20   |  329k  |
+| Spiegel.de headlines    | **9**/10 |   10   |   93k    |     8/10      |   7   |  66k   |
+| Google Maps restaurants | **7**/10 |   18   |   245k   |     4/10      |   7   |  66k   |
+| DuckDuckGo search       | **7**/10 |   13   |   167k   |     5/10      |  33   |  662k  |
+| **Average**             | **8.0**  | **17** | **288k** |      6.5      |  17   |  281k  |
+
+webctl achieves higher quality scores on 3 of 4 tasks, with comparable turn counts overall. On complex sites (Google Maps, DuckDuckGo), webctl's automatic fallbacks (cookie dismiss, scroll-to-find, overlay retry) and context-efficient snapshots make a significant difference.
+
+<details>
+<summary>Benchmark details</summary>
+
+**Setup**: Each task runs Claude Opus with a single tool (webctl or agent-browser), a $1 budget cap, and no human intervention. Quality is scored 0-10 by a separate Claude evaluation call.
+
+**Tasks**:
+1. **Amazon product lookup**: Find price and shipping for a specific product on amazon.de
+2. **Spiegel.de headlines**: Extract top 5 headlines from a German news site
+3. **Google Maps restaurants**: Find vegan Chinese restaurants in Berlin rated >4 stars
+4. **DuckDuckGo search**: Search for penguin fan sites and return top 3 results
+
+Run benchmarks yourself: `bash benchmarks/bench_run.sh`
+
+</details>
 
 ---
 
@@ -113,10 +143,10 @@ If your agent doesn't auto-detect the generated files, add this to your system p
 Verify the installation works by driving it yourself:
 
 ```bash
-webctl start                    # Opens visible browser window
-webctl navigate "https://example.com"
-webctl snapshot --interactive-only
-webctl stop --daemon            # Closes browser and daemon
+webctl navigate "https://example.com"   # Auto-starts browser
+webctl snapshot                         # See all elements with @refs
+webctl click "Some link"                # Click by text description
+webctl stop                             # Closes browser and daemon
 ```
 
 <details>
@@ -189,13 +219,14 @@ webctl screenshot --path shot.png
 ### Interaction
 
 ```bash
-webctl click 'role=button name~="Submit"'
-webctl type 'role=textbox name~="Email"' "user@example.com"
-webctl type 'role=textbox name~="Search"' "query" --submit
-webctl select 'role=combobox name~="Country"' --label "Germany"
-webctl check 'role=checkbox name~="Remember"'
+webctl click "Submit"                          # By text description
+webctl click @e3                               # By @ref from snapshot
+webctl type "Email" "user@example.com"         # Smart targeting
+webctl type "Country" "Germany"                # Auto-detects dropdowns
+webctl type "Search" "query" --submit          # Type + press Enter
 webctl press Enter
 webctl scroll down
+webctl do '[[...],[...]]' --snapshot           # Batch multiple actions
 ```
 
 ### Wait Conditions

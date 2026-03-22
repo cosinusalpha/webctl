@@ -132,16 +132,13 @@ def filter_a11y_items(
     count = 0
 
     for item in items:
-        # Check limit
         if filter_config.limit is not None and count >= filter_config.limit:
             return
 
-        # Check depth (if available in item)
         depth = item.get("_depth", 0)
         if filter_config.max_depth is not None and depth > filter_config.max_depth:
             continue
 
-        # Check role
         role = item.get("role", "")
         if not filter_config.should_include_role(role):
             continue

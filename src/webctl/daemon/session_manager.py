@@ -62,6 +62,32 @@ class SessionState:
     _page_counter: int = 0
     _dismissed_domains: set[str] = field(default_factory=set)  # Track domains where we dismissed
     _navigating_pages: set[str] = field(default_factory=set)  # Pages with active navigate command
+    # Ref store: maps @e1 -> {role, name, ...} for compact ref-based interactions
+    _ref_counter: int = 0
+    _refs: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def store_refs(self, items: list[dict[str, Any]]) -> dict[str, str]:
+        """Store element refs from a snapshot. Returns mapping of item_id -> ref."""
+        self._refs.clear()
+        self._ref_counter = 0
+        id_to_ref: dict[str, str] = {}
+        for item in items:
+            self._ref_counter += 1
+            ref = f"e{self._ref_counter}"
+            self._refs[ref] = {
+                "role": item.get("role", ""),
+                "name": item.get("name", ""),
+                "id": item.get("id", ""),
+            }
+            item_id = item.get("id", "")
+            if item_id:
+                id_to_ref[item_id] = ref
+        return id_to_ref
+
+    def resolve_ref(self, ref: str) -> dict[str, Any] | None:
+        """Resolve a @ref to element data. Accepts 'e1' or '@e1'."""
+        key = ref.lstrip("@")
+        return self._refs.get(key)
 
 
 class SessionManager:
@@ -74,6 +100,23 @@ class SessionManager:
         self._auth_detector = AuthDetector()
         self._action_detector = ActionDetector()
         self._cookie_dismisser = CookieBannerDismisser()
+
+    async def ensure_session(
+        self,
+        session_id: str,
+        mode: str | None = None,
+    ) -> SessionState:
+        """Get existing session or create a new one with default settings."""
+        existing = self.get_session(session_id)
+        if existing:
+            return existing
+
+        resolved_mode = mode or WebctlConfig.load().default_mode
+        cfg = WebctlConfig.load()
+        policy = cfg.domain_policy.policy if cfg.domain_policy.enabled else None
+        return await self.create_session(
+            session_id, mode=resolved_mode, domain_policy=policy
+        )
 
     async def _ensure_playwright(self) -> None:
         if self._playwright is None:

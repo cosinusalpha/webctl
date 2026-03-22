@@ -22,7 +22,7 @@ from .registry import register
 async def handle_snapshot(
     request: Request, session_manager: SessionManager, **kwargs: Any
 ) -> AsyncIterator[Response]:
-    """Take a snapshot of the current page."""
+    """Take a snapshot of the current page. Auto-starts session if needed."""
     session_id = request.args.get("session", "default")
     view = request.args.get("view", "a11y")
     include_bbox = request.args.get("include_bbox", False)
@@ -36,12 +36,23 @@ async def handle_snapshot(
     # Large output handling options
     grep_pattern = request.args.get("grep_pattern")
     max_name_length = request.args.get("max_name_length")
-    visible_only = request.args.get(
-        "visible_only", False
-    )  # Default False - bbox check is expensive
+    visible_only = request.args.get("visible_only", False)
     names_only = request.args.get("names_only", False)
     show_query = request.args.get("show_query", False)
     count_only = request.args.get("count_only", False)
+    compact_refs = request.args.get("compact_refs", True)  # Default ON for @refs
+    read_mode = request.args.get("read", False)
+
+    # Auto-start session if needed
+    try:
+        await session_manager.ensure_session(session_id)
+    except Exception as e:
+        yield ErrorResponse(
+            req_id=request.req_id,
+            error=f"Failed to start session: {e}",
+            code="session_start_failed",
+        )
+        return
 
     page = session_manager.get_active_page(session_id)
     if not page:
@@ -50,6 +61,19 @@ async def handle_snapshot(
             error="No active page",
             code="no_active_page",
         )
+        return
+
+    # --read mode: return markdown content
+    if read_mode:
+        try:
+            from ...views.markdown import extract_markdown_view
+
+            async for item in extract_markdown_view(page):
+                item["req_id"] = request.req_id
+                yield ItemResponse(req_id=request.req_id, view="md", data=item)
+            yield DoneResponse(req_id=request.req_id, ok=True)
+        except Exception as e:
+            yield ErrorResponse(req_id=request.req_id, error=str(e))
         return
 
     try:
@@ -68,17 +92,33 @@ async def handle_snapshot(
                 names_only=names_only,
                 show_query=show_query,
                 count_only=count_only,
+                compact_refs=compact_refs,
             )
-            # Collect statistics during extraction
+            # Collect statistics and items during extraction
             stats: dict[str, Any] = {"total": 0, "by_role": {}}
+            collected_items: list[dict[str, Any]] = []
             async for item in extract_a11y_view(page, options):
                 item["req_id"] = request.req_id
                 # Track stats
                 stats["total"] += 1
                 role = item.get("role", "unknown")
                 stats["by_role"][role] = stats["by_role"].get(role, 0) + 1
-                # Only yield items if not count_only mode
-                if not count_only:
+                collected_items.append(item)
+
+            # Store refs if compact_refs mode
+            if compact_refs:
+                session = session_manager.get_session(session_id)
+                if session:
+                    id_to_ref = session.store_refs(collected_items)
+                    # Add ref to each item
+                    for item in collected_items:
+                        item_id = item.get("id", "")
+                        if item_id in id_to_ref:
+                            item["ref"] = id_to_ref[item_id]
+
+            # Yield items (unless count_only)
+            if not count_only:
+                for item in collected_items:
                     yield ItemResponse(
                         req_id=request.req_id,
                         view="a11y",
@@ -296,7 +336,6 @@ async def handle_query(
                     f"Role '{query_role}' not found. Did you mean: {', '.join(similar_roles)}?"
                 )
             else:
-                INTERACTIVE_ROLES | LANDMARK_ROLES | STRUCTURAL_ROLES
                 suggestions.append(
                     f"Role '{query_role}' not found. Available roles on page: {', '.join(sorted(all_roles)[:10])}"
                 )

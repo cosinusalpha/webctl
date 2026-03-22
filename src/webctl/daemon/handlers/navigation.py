@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
-from ...protocol.messages import DoneResponse, ErrorResponse, Request, Response
+from ...protocol.messages import DoneResponse, ErrorResponse, ItemResponse, Request, Response
 from ...views.a11y import A11yExtractOptions, extract_a11y_view
 from ..detectors.cookie_banner import dismiss_cookie_banner
 from ..event_emitter import EventEmitter
@@ -14,43 +14,40 @@ from ..session_manager import SessionManager
 from .registry import register
 
 
-async def _build_page_summary(page: "Page") -> dict[str, Any]:  # noqa: F821
-    """Build a compact page summary with headings, top interactive elements, and markdown preview."""
-    summary: dict[str, Any] = {"url": page.url, "title": await page.title()}
+async def _build_snapshot_with_refs(
+    page: "Page",  # noqa: F821
+    session: Any,
+    request: Request,
+    interactive_only: bool = False,
+) -> tuple[list[Response], dict[str, Any]]:
+    """Build a snapshot with @refs, return (responses, stats)."""
+    options = A11yExtractOptions(
+        include_path_hint=False,
+        interactive_only=interactive_only,
+        compact_refs=True,
+    )
 
-    # Collect compact a11y overview: headings + first interactive elements
-    try:
-        headings: list[str] = []
-        interactive: list[str] = []
-        options = A11yExtractOptions(
-            include_path_hint=False,
-            names_only=True,
-            interesting_only=True,
-        )
-        async for item in extract_a11y_view(page, options):
-            role = item.get("role", "")
-            name = item.get("name", "")
-            label = f'{role} "{name}"' if name else role
-            if role == "heading" and len(headings) < 5:
-                headings.append(label)
-            elif role in {
-                "button",
-                "link",
-                "textbox",
-                "searchbox",
-                "combobox",
-                "checkbox",
-            } and len(interactive) < 10:
-                interactive.append(label)
-            # Stop early once we have enough
-            if len(headings) >= 5 and len(interactive) >= 10:
-                break
-        summary["headings"] = headings
-        summary["interactive"] = interactive
-    except Exception:
-        pass
+    collected: list[dict[str, Any]] = []
+    stats: dict[str, Any] = {"total": 0, "by_role": {}}
+    async for item in extract_a11y_view(page, options):
+        stats["total"] += 1
+        role = item.get("role", "unknown")
+        stats["by_role"][role] = stats["by_role"].get(role, 0) + 1
+        collected.append(item)
 
-    return summary
+    # Store refs in session
+    if session:
+        id_to_ref = session.store_refs(collected)
+        for item in collected:
+            item_id = item.get("id", "")
+            if item_id in id_to_ref:
+                item["ref"] = id_to_ref[item_id]
+
+    responses: list[Response] = []
+    for item in collected:
+        responses.append(ItemResponse(req_id=request.req_id, view="a11y", data=item))
+
+    return responses, stats
 
 
 @register("navigate")
@@ -60,10 +57,12 @@ async def handle_navigate(
     event_emitter: EventEmitter,
     **kwargs: Any,
 ) -> AsyncIterator[Response]:
-    """Navigate to a URL."""
+    """Navigate to a URL. Auto-starts session if needed. Returns snapshot with @refs."""
     url = request.args.get("url")
     session_id = request.args.get("session", "default")
     wait_until = request.args.get("wait_until", "load")
+    read_mode = request.args.get("read", False)
+    search_query = request.args.get("search")
 
     if not url:
         yield ErrorResponse(
@@ -73,12 +72,14 @@ async def handle_navigate(
         )
         return
 
-    session = session_manager.get_session(session_id)
-    if not session:
+    # Auto-start session if needed
+    try:
+        session = await session_manager.ensure_session(session_id)
+    except Exception as e:
         yield ErrorResponse(
             req_id=request.req_id,
-            error=f"Session '{session_id}' not found",
-            code="session_not_found",
+            error=f"Failed to start session: {e}",
+            code="session_start_failed",
         )
         return
 
@@ -125,9 +126,63 @@ async def handle_navigate(
 
         await event_emitter.emit_navigation_finished(page.url, page_id)
 
-        summary = await _build_page_summary(page)
+        summary: dict[str, Any] = {
+            "url": page.url,
+            "title": await page.title(),
+        }
         if cookie_result.dismissed:
             summary["cookie_banner_dismissed"] = True
+
+        # --search: find search box, type query, press Enter, wait
+        if search_query:
+            from .interact import TYPEABLE_ROLES, make_locator, resolve_by_description
+
+            search_result = await resolve_by_description(
+                page, "Search", frozenset({"searchbox", "textbox", "combobox"})
+            )
+            if hasattr(search_result, "element"):
+                locator = make_locator(page, search_result.element)
+                await locator.first.fill(search_query)
+                await locator.first.press("Enter")
+                # Wait for results
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=10000)
+                except Exception:
+                    await asyncio.sleep(2)
+                summary["searched"] = search_query
+                summary["url"] = page.url
+                summary["title"] = await page.title()
+            else:
+                summary["search_warning"] = "No search box found"
+
+        # --read: return markdown content
+        if read_mode:
+            from ...views.markdown import extract_markdown_view
+
+            md_items: list[str] = []
+            async for item in extract_markdown_view(page):
+                text = item.get("text", item.get("content", ""))
+                if text:
+                    md_items.append(text)
+
+            if md_items:
+                yield ItemResponse(
+                    req_id=request.req_id,
+                    view="md",
+                    data={"text": "\n".join(md_items)},
+                )
+
+            yield DoneResponse(req_id=request.req_id, ok=True, summary=summary)
+            return
+
+        # Default: return snapshot with @refs (headings + interactive)
+        responses, snap_stats = await _build_snapshot_with_refs(
+            page, session, request, interactive_only=False
+        )
+        summary["elements"] = snap_stats
+
+        for resp in responses:
+            yield resp
 
         yield DoneResponse(
             req_id=request.req_id,

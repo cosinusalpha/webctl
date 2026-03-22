@@ -52,7 +52,7 @@ def run_webctl(*args, timeout=30, check=True) -> subprocess.CompletedProcess:
 @pytest.fixture(scope="module")
 def live_session():
     """Start a headless browser session for live tests."""
-    run_webctl("stop", "--daemon", check=False)
+    run_webctl("stop", check=False)
     time.sleep(0.5)
 
     result = run_webctl("start", "--mode", "unattended", timeout=30)
@@ -60,7 +60,7 @@ def live_session():
 
     yield
 
-    run_webctl("stop", "--daemon", check=False)
+    run_webctl("stop", check=False)
 
 
 pytestmark = pytest.mark.live
