@@ -1,5 +1,5 @@
 """
-Interaction command handlers (click, type, scroll, etc.).
+Interaction command handlers (click, type, etc.).
 """
 
 import asyncio
@@ -480,35 +480,22 @@ async def _click_with_overlay_retry(locator: Any, page: Page) -> None:
 async def _snapshot_after(
     request: Request, session_manager: SessionManager, session_id: str
 ) -> AsyncIterator[Response]:
-    """Take a compact ref snapshot and yield it as items. Used by --snapshot flag."""
-    from ...views.a11y import A11yExtractOptions, extract_a11y_view
+    """Take a landmark-aware snapshot and yield it as items. Used by --snapshot flag."""
+    from .navigation import _build_smart_navigate_snapshot
 
     page = session_manager.get_active_page(session_id)
     if not page:
         return
 
-    options = A11yExtractOptions(
-        include_path_hint=False,
-        interactive_only=True,
-        compact_refs=True,
-        max_name_length=80,
-    )
-    collected: list[dict[str, Any]] = []
-    async for item in extract_a11y_view(page, options):
-        collected.append(item)
-
-    # Store refs
     session = session_manager.get_session(session_id)
-    if session:
-        id_to_ref = session.store_refs(collected)
-        for item in collected:
-            item_id = item.get("id", "")
-            if item_id in id_to_ref:
-                item["ref"] = id_to_ref[item_id]
+    responses, stats = await _build_smart_navigate_snapshot(
+        page, session, request,
+        max_name_length=80,
+        auto_limit=200,
+    )
 
-    for item in collected:
-        item["req_id"] = request.req_id
-        yield ItemResponse(req_id=request.req_id, view="a11y", data=item)
+    for resp in responses:
+        yield resp
 
 
 @register("click")
@@ -660,6 +647,8 @@ async def handle_type(
                     # Fallback: some comboboxes need click + type
                     await locator.first.click()
                     await page.keyboard.type(text)
+                    if submit:
+                        await page.keyboard.press("Enter")
                     action_taken = "keyboard_type"
             elif role in CHECKABLE_ROLES:
                 # Auto-detect: check/uncheck based on text
@@ -675,7 +664,7 @@ async def handle_type(
                     await locator.first.clear()
                 await locator.first.fill(text)
                 if submit:
-                    await locator.first.press("Enter")
+                    await page.keyboard.press("Enter")
 
         await with_retry(do_type, retry, retry_delay)
 
@@ -771,56 +760,6 @@ async def handle_set_value(
         )
 
 
-@register("scroll")
-async def handle_scroll(
-    request: Request, session_manager: SessionManager, **kwargs: Any
-) -> AsyncIterator[Response]:
-    """Scroll the page or an element."""
-    session_id = request.args.get("session", "default")
-    direction = request.args.get("direction", "down")
-    amount = request.args.get("amount", 300)
-    query = request.args.get("query")
-    snapshot_after = request.args.get("snapshot_after", False)
-
-    page = session_manager.get_active_page(session_id)
-    if not page:
-        yield ErrorResponse(
-            req_id=request.req_id,
-            error="No active page",
-            code="no_active_page",
-        )
-        return
-
-    try:
-        if query:
-            session = session_manager.get_session(session_id)
-            result = await resolve_target(page, session, query)
-            if isinstance(result, ResolveError):
-                yield ErrorResponse(
-                    req_id=request.req_id,
-                    error=result.message,
-                    code=result.code,
-                    details={
-                        "suggestions": result.suggestions,
-                        "similar_elements": result.similar_elements,
-                    },
-                )
-                return
-
-            locator = make_locator(page, result.element)
-            await locator.first.scroll_into_view_if_needed()
-        else:
-            delta_y = amount if direction == "down" else -amount
-            await page.mouse.wheel(0, delta_y)
-
-        yield DoneResponse(req_id=request.req_id, ok=True)
-
-        if snapshot_after:
-            async for resp in _snapshot_after(request, session_manager, session_id):
-                yield resp
-
-    except Exception as e:
-        yield ErrorResponse(req_id=request.req_id, error=str(e))
 
 
 @register("press")
@@ -1366,12 +1305,6 @@ async def handle_do(
                 await page.keyboard.press(target)
                 completed.append({"action": "press", "key": target, "ok": True})
 
-            elif action == "scroll":
-                direction = target.lower()
-                delta_y = 300 if direction == "down" else -300
-                await page.mouse.wheel(0, delta_y)
-                completed.append({"action": "scroll", "direction": direction, "ok": True})
-
             elif action == "wait":
                 from .wait import perform_wait
 
@@ -1381,7 +1314,7 @@ async def handle_do(
             else:
                 yield ErrorResponse(
                     req_id=request.req_id,
-                    error=f"Action {idx}: unknown action '{action}'. Use: click, type, press, scroll, wait",
+                    error=f"Action {idx}: unknown action '{action}'. Use: click, type, press, wait",
                     code="invalid_action",
                     details={"completed": completed, "failed_at": idx},
                 )

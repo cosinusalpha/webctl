@@ -68,6 +68,10 @@ NAVIGATE_ROLES = (
     | frozenset({"heading", "table", "grid", "tablist", "toolbar", "dialog", "alertdialog", "alert"})
 )
 
+# Extended set for main landmark content: includes article/feed/text/img so that
+# search result cards (Maps, Amazon, etc.) are complete in a single snapshot.
+_MAIN_CONTENT_ROLES = NAVIGATE_ROLES | frozenset({"article", "feed", "text", "img"})
+
 
 @dataclass
 class SnapshotFilter:
@@ -228,21 +232,25 @@ def landmark_aware_filter(items: list[dict[str, Any]], allowed_roles: frozenset[
     collapsed_landmarks: list[dict[str, Any]] = []  # banner/nav/complementary — just landmarks
     orphan_items: list[dict[str, Any]] = []  # items not inside any landmark
 
-    current_landmark: str | None = None
-    landmark_depth: int = -1
-    current_collapsed_id: int | None = None  # id() of the active collapsed landmark
     child_count: dict[int, int] = {}  # id(landmark_item) -> count of children
+
+    # Stack of (effective_role, depth, collapsed_id_or_None)
+    # effective_role: the landmark role used for routing (e.g. "complementary" for large dialogs)
+    # collapsed_id: id() of the landmark item in collapsed_landmarks, for child counting
+    landmark_stack: list[tuple[str, int, int | None]] = []
 
     for idx, item in enumerate(items):
         depth = item.get("_depth", 0)
         role = item.get("role", "")
 
-        # Detect landmark boundaries — always switch context for any landmark/priority role,
-        # even when nested (e.g., search inside banner), so sub-landmarks get proper treatment
+        # Pop landmarks we've exited (item at same or shallower depth)
+        while landmark_stack and depth <= landmark_stack[-1][1]:
+            landmark_stack.pop()
+
+        # Enter new landmark or priority role
         if role in LANDMARK_ROLES or role in _PRIORITY_ROLES:
-            current_landmark = role
-            landmark_depth = depth
-            current_collapsed_id = None
+            collapsed_id: int | None = None
+            effective_role = role
 
             if role in _PRIORITY_ROLES and idx not in large_dialog_indices:
                 priority_items.append(item)
@@ -250,8 +258,8 @@ def landmark_aware_filter(items: list[dict[str, Any]], allowed_roles: frozenset[
                 # Large dialog/alert — collapse like complementary
                 collapsed_landmarks.append(item)
                 child_count[id(item)] = 0
-                current_collapsed_id = id(item)
-                current_landmark = "complementary"  # route children to collapse
+                collapsed_id = id(item)
+                effective_role = "complementary"  # route children to collapse
             elif role == "search":
                 search_items.append(item)
             elif role == "main":
@@ -261,15 +269,19 @@ def landmark_aware_filter(items: list[dict[str, Any]], allowed_roles: frozenset[
             elif role in _COLLAPSE_LANDMARKS:
                 collapsed_landmarks.append(item)
                 child_count[id(item)] = 0
-                current_collapsed_id = id(item)
-            # contentinfo: skip entirely
+                collapsed_id = id(item)
+            # contentinfo: skip entirely (but still push to stack so children are hidden)
+
+            landmark_stack.append((effective_role, depth, collapsed_id))
             continue
 
-        # Check if we've exited the current landmark
-        if current_landmark is not None and depth <= landmark_depth and role not in LANDMARK_ROLES and role not in _PRIORITY_ROLES:
+        # Current context = top of stack (or None if orphan)
+        if not landmark_stack:
             current_landmark = None
-            landmark_depth = -1
             current_collapsed_id = None
+        else:
+            current_landmark = landmark_stack[-1][0]
+            current_collapsed_id = landmark_stack[-1][2]
 
         # Route item based on current landmark context
         if current_landmark is None:
@@ -283,7 +295,7 @@ def landmark_aware_filter(items: list[dict[str, Any]], allowed_roles: frozenset[
             if role in INTERACTIVE_ROLES:
                 search_items.append(item)
         elif current_landmark == "main":
-            if role in allowed_roles:
+            if role in _MAIN_CONTENT_ROLES:
                 main_items.append(item)
         elif current_landmark in _COMPACT_LANDMARKS:
             if role in INTERACTIVE_ROLES:
@@ -357,6 +369,31 @@ def collapse_containers(items: list[dict[str, Any]], threshold: int = 5) -> list
             name = parent.get("name", "")
             parent["name"] = f"{name} ({c_count} items)" if name else f"({c_count} items)"
 
+    return result
+
+
+def deduplicate_adjacent(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove adjacent link+heading pairs with the same name, keeping the link."""
+    if not items:
+        return items
+    result: list[dict[str, Any]] = []
+    skip_next = False
+    for i, item in enumerate(items):
+        if skip_next:
+            skip_next = False
+            continue
+        if i + 1 < len(items):
+            nxt = items[i + 1]
+            if (
+                item.get("name")
+                and item["name"] == nxt.get("name")
+                and {item.get("role"), nxt.get("role")} == {"link", "heading"}
+            ):
+                # Keep the link (clickable), skip the heading
+                result.append(item if item["role"] == "link" else nxt)
+                skip_next = True
+                continue
+        result.append(item)
     return result
 
 

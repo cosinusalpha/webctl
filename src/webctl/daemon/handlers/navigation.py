@@ -8,7 +8,7 @@ from typing import Any
 
 from ...protocol.messages import DoneResponse, ErrorResponse, ItemResponse, Request, Response
 from ...views.a11y import A11yExtractOptions, extract_a11y_view, parse_aria_snapshot
-from ...views.filters import NAVIGATE_ROLES, collapse_containers, landmark_aware_filter
+from ...views.filters import NAVIGATE_ROLES, collapse_containers, deduplicate_adjacent, landmark_aware_filter
 from ..detectors.cookie_banner import dismiss_cookie_banner
 from ..event_emitter import EventEmitter
 from ..session_manager import SessionManager
@@ -76,6 +76,7 @@ async def _build_smart_navigate_snapshot(
     auto_limit: int = 200,
 ) -> tuple[list[Response], dict[str, Any]]:
     """Build a landmark-aware snapshot: dialog/alert first, main expanded, nav/footer collapsed."""
+    from ...views.markdown import _extract_structured_data
     from ...views.redaction import redact_if_sensitive
 
     try:
@@ -88,13 +89,23 @@ async def _build_smart_navigate_snapshot(
 
     items = parse_aria_snapshot(snapshot_str)
 
+    # Extract structured data (JSON-LD, Open Graph) — cheap and very useful for product/article pages
+    structured_data = ""
+    try:
+        structured_data = await _extract_structured_data(page)
+    except Exception:
+        pass
+
     # Step 1: Landmark-aware partitioning (dialog first, main expanded, nav collapsed, etc.)
     items = landmark_aware_filter(items)
 
     # Step 2: Collapse combobox/listbox children
     items = collapse_containers(items)
 
-    # Step 3: Truncate names and redact sensitive content
+    # Step 3: Deduplicate adjacent link+heading pairs with same name
+    items = deduplicate_adjacent(items)
+
+    # Step 4: Truncate names and redact sensitive content
     for item in items:
         name = item.get("name", "")
         if name:
@@ -133,6 +144,15 @@ async def _build_smart_navigate_snapshot(
                 item["ref"] = id_to_ref[item_id]
 
     responses: list[Response] = []
+
+    # Prepend structured data (JSON-LD/OG) as a text item if available
+    if structured_data:
+        responses.append(ItemResponse(
+            req_id=request.req_id,
+            view="md",
+            data={"content": structured_data.strip(), "title": "", "url": ""},
+        ))
+
     for item in items:
         responses.append(ItemResponse(req_id=request.req_id, view="a11y", data=item))
 
@@ -185,12 +205,17 @@ async def handle_navigate(
 
     page = session_manager.get_active_page(session_id)
     if not page:
-        yield ErrorResponse(
-            req_id=request.req_id,
-            error="No active page",
-            code="no_active_page",
-        )
-        return
+        # All pages closed — open a fresh one so navigate always works
+        try:
+            page = await session.context.new_page()
+            await session_manager._register_page(session, page, "tab")
+        except Exception as e:
+            yield ErrorResponse(
+                req_id=request.req_id,
+                error=f"No active page and failed to open new one: {e}",
+                code="no_active_page",
+            )
+            return
 
     try:
         # Emit navigation started event
@@ -223,6 +248,9 @@ async def handle_navigate(
             summary["cookie_banner_dismissed"] = True
 
         # --search: find search box, type query, press Enter, wait
+        # Uses keyboard navigation like a screen reader — fill the box,
+        # then press Enter via the keyboard (not the locator) because
+        # comboboxes change their accessible name after fill.
         if search_query:
             from .interact import make_locator, resolve_searchbox
 
@@ -230,7 +258,7 @@ async def handle_navigate(
             if hasattr(search_result, "element"):
                 locator = make_locator(page, search_result.element)
                 await locator.first.fill(search_query)
-                await locator.first.press("Enter")
+                await page.keyboard.press("Enter")
                 # Wait for results
                 try:
                     await page.wait_for_load_state("networkidle", timeout=10000)

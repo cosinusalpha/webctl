@@ -177,7 +177,8 @@ class OutputFormatter:
 
     def _output_a11y_compact(self, data: dict[str, Any]) -> None:
         """Output an a11y item in compact one-line format."""
-        node_id = data.get("id", "")
+        ref = data.get("ref", "")
+        node_id = f"@{ref}" if ref else data.get("id", "")
         role = data.get("role", "")
         name = data.get("name", "")
 
@@ -280,7 +281,8 @@ class OutputFormatter:
         """Output an a11y tree item."""
         role = data.get("role", "")
         name = data.get("name", "")
-        node_id = data.get("id", "")
+        ref = data.get("ref", "")
+        node_id = f"@{ref}" if ref else data.get("id", "")
 
         # Build state indicators
         states = []

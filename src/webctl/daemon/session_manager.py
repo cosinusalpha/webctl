@@ -62,6 +62,7 @@ class SessionState:
     _page_counter: int = 0
     _dismissed_domains: set[str] = field(default_factory=set)  # Track domains where we dismissed
     _navigating_pages: set[str] = field(default_factory=set)  # Pages with active navigate command
+    _emitted_actions: set[str] = field(default_factory=set)  # Rate-limit action events: "page_id:description"
     # Ref store: maps @e1 -> {role, name, ...} for compact ref-based interactions
     _ref_counter: int = 0
     _refs: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -318,15 +319,18 @@ class SessionManager:
             if auth_result.requires_human:
                 return
 
-        # Check for user action requirement
+        # Check for user action requirement (rate-limit: once per page per description)
         action_result = await self._action_detector.detect(page_info.page)
         if action_result.detected:
-            await self._event_emitter.emit_user_action_required(
-                page_id=page_id,
-                kind=action_result.kind,
-                description=action_result.description,
-                selector_hint=action_result.selector_hint,
-            )
+            key = f"{page_id}:{action_result.description}"
+            if key not in session._emitted_actions:
+                session._emitted_actions.add(key)
+                await self._event_emitter.emit_user_action_required(
+                    page_id=page_id,
+                    kind=action_result.kind,
+                    description=action_result.description,
+                    selector_hint=action_result.selector_hint,
+                )
 
     async def _try_dismiss_cookies(self, session: SessionState, page: Page, url: str) -> None:
         """Attempt to dismiss cookie banner for the current page."""

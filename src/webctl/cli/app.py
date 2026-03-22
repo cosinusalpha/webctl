@@ -503,7 +503,7 @@ Navigate: `webctl navigate "url"` (auto-starts session) | End: `webctl stop`
 - `webctl type @e2 "text"` or `webctl type "Email" "text"` - Type by @ref or text
 - `webctl type "Country" "Germany"` - Auto-selects from dropdown
 - `webctl do '[["type","Email","x@y.com"],["type","Password","***"],["click","Log in"]]' --snapshot`
-- `webctl press Enter` | `webctl scroll down` | `webctl wait network-idle`
+- `webctl press Enter` | `webctl wait network-idle`
 
 ## Target Syntax (for click/type)
 - `@e3` - Element ref from snapshot (fastest)
@@ -1195,30 +1195,6 @@ def cmd_type(
                 "retry": retry,
                 "retry_delay": retry_delay,
                 "wait_after": wait_after,
-                "snapshot_after": snapshot,
-                "session": _session,
-            },
-        )
-    )
-
-
-@app.command("scroll")
-def cmd_scroll(
-    direction: str = typer.Argument("down", help="Direction: up, down"),
-    amount: int = typer.Option(300, "--amount", "-a", help="Scroll amount in pixels"),
-    query: str | None = typer.Option(None, "--to", "-t", help="Scroll element into view"),
-    snapshot: bool = typer.Option(
-        False, "--snapshot", "-S", help="Return page snapshot after scrolling"
-    ),
-) -> None:
-    """Scroll the page."""
-    asyncio.run(
-        run_command(
-            "scroll",
-            {
-                "direction": direction,
-                "amount": amount,
-                "query": query,
                 "snapshot_after": snapshot,
                 "session": _session,
             },

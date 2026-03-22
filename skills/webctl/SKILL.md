@@ -65,20 +65,13 @@ webctl type "Email" "x" --snapshot  # type + return page state
 ```bash
 webctl do '[["type","Email","user@test.com"],["type","Password","secret"],["click","Log in"]]' --snapshot
 ```
-Actions: `click`, `type`, `press`, `scroll`, `wait`. Stops on first failure.
+Actions: `click`, `type`, `press`, `wait`. Stops on first failure.
 
 ### press - Keyboard key
 ```bash
 webctl press Enter
 webctl press Escape
 webctl press Tab
-```
-
-### scroll - Scroll viewport
-```bash
-webctl scroll down
-webctl scroll up
-webctl scroll down --snapshot       # scroll + return page state
 ```
 
 ### wait - Wait for condition

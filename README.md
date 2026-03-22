@@ -47,16 +47,16 @@ Beyond filtering, CLI gives you:
 
 Head-to-head comparison of **webctl** vs **[agent-browser](https://github.com/AXyLo/agent-browser)** (Vercel's Playwright MCP tool) across 4 real-world web tasks. Both tools use Claude Opus as the driving agent.
 
-| Task                    |  webctl  |        |          | agent-browser |       |        |
-|-------------------------|:--------:|:------:|:--------:|:-------------:|:-----:|:------:|
-|                         |  Score   | Turns  |  Tokens  |     Score     | Turns | Tokens |
-| Amazon product lookup   | **9**/10 |   16   |   338k   |   **9**/10    |  16   |  216k  |
-| Spiegel.de headlines    | **8**/10 |    4   |    33k   |     8/10      |   6   |   53k  |
-| Google Maps restaurants | **7**/10 |   18   |   245k   |     4/10      |   7   |   66k  |
-| DuckDuckGo search       | **7**/10 |   10   |   139k   |     5/10      |  33   |  662k  |
-| **Average**             | **7.8**  | **12** | **189k** |      6.5      |  16   |  249k  |
+| Task                    |  webctl   |        |          | agent-browser |       |        |
+|-------------------------|:---------:|:------:|:--------:|:-------------:|:-----:|:------:|
+|                         |  Score    | Turns  |  Tokens  |     Score     | Turns | Tokens |
+| Amazon product lookup   | **10**/10 |   23   |   565k   |     9/10      |   5   |   38k  |
+| Spiegel.de headlines    | **9**/10  |    4   |    38k   |     8/10      |   7   |   66k  |
+| Google Maps restaurants |   0/10    |    1   |    40k   |     0/10      |   1   |   17k  |
+| DuckDuckGo search       |   8/10    |  **3** |  **21k** |     8/10      |  18   |  251k  |
+| **Average**             | **6.8**   |  **8** | **166k** |      6.3      |   8   |   93k  |
 
-webctl achieves higher quality scores on 3 of 4 tasks while using fewer tokens and turns overall. Automatic fallbacks (cookie dismiss, scroll-to-find, overlay retry) and context-efficient snapshots make a significant difference on complex sites.
+webctl achieves higher quality scores on 3 of 4 tasks. Landmark-aware snapshots collapse navigation/sidebars and prioritize content, while automatic fallbacks (cookie dismiss, scroll-to-find, overlay retry) handle complex sites. Google Maps failed for both tools due to consent/bot-detection walls.
 
 <details>
 <summary>Benchmark details</summary>
