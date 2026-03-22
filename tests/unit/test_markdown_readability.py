@@ -64,7 +64,7 @@ class TestTruncation:
         assert "[... content truncated ...]" not in md
 
     def test_max_content_length_constant(self):
-        assert MAX_CONTENT_LENGTH == 50000
+        assert MAX_CONTENT_LENGTH == 16000
 
 
 class TestRedaction:

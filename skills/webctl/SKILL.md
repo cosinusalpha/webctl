@@ -9,29 +9,37 @@ allowed-tools: Bash(webctl *), Bash(webctl), Read
 ## Workflow
 
 ```bash
-# 1. Navigate (auto-starts session, returns snapshot with @refs)
+# 1. Navigate — returns structured data + interactive elements with @refs
 webctl navigate "https://example.com"
 
-# 2. Interact using @refs from snapshot
+# 2. Interact using @refs or text descriptions
 webctl click @e3
-webctl type @e2 "user@example.com"
-
-# 3. Or interact by text description (no snapshot needed)
-webctl click "Submit"
 webctl type "Email" "user@example.com"
 
-# 4. End session
+# 3. End session
 webctl stop
 ```
 
+## Choosing the Right Approach
+
+| Goal | Command |
+|------|---------|
+| Browse / interact with a page | `navigate URL` — returns structured data + a11y snapshot with @refs |
+| Read article content | `navigate URL --read` — returns readable markdown |
+| Search a website | `navigate URL --search "query"` — types query + returns results |
+| Filter specific elements | `navigate URL --grep "€\|price"` — filtered a11y snapshot |
+
 ## Commands (10 total)
 
-### navigate - Go to URL (returns snapshot with @refs)
+### navigate - Go to URL
 ```bash
-webctl navigate "https://example.com"              # snapshot with @refs
-webctl navigate "https://example.com" --read        # readable text content
-webctl navigate "https://duckduckgo.com" --search "query"  # search + results
+webctl navigate "https://example.com"                        # structured data + a11y snapshot with @refs (default)
+webctl navigate "https://example.com" --grep "€|price"       # filtered a11y snapshot
+webctl navigate "https://example.com" --read                  # readable text content
+webctl navigate "https://duckduckgo.com" --search "query"     # search + results snapshot
 ```
+
+The default returns **structured data** (JSON-LD, Open Graph — price, rating, etc.) plus the full a11y snapshot with @refs for interaction.
 
 ### snapshot - Re-scan current page
 ```bash
@@ -49,7 +57,7 @@ webctl click @e3                    # by @ref (fastest)
 webctl click "Submit"               # by text description
 webctl click 'role=button name~="Submit"'  # by query (fallback)
 webctl click "Submit" --snapshot    # click + return new page state
-webctl click "Next" --wait network-idle  # click + wait
+webctl click "Next" --snapshot --grep "result"  # click + filtered snapshot
 ```
 
 ### type - Type text (auto-detects dropdowns and checkboxes)
@@ -104,7 +112,7 @@ Actions (click, type) accept three target formats:
 | Text | `"Submit"` | When you know the element text |
 | Query | `'role=button name~="Submit"'` | When text is ambiguous |
 
-**@refs** are assigned by `navigate` and `snapshot`. They reset on each snapshot.
+**@refs** are assigned by `snapshot` and `navigate --snapshot/--search/--grep`. They reset on each snapshot.
 
 **Text descriptions** are fuzzy-matched against interactive elements. webctl prefers the right role for the action (click prefers buttons/links, type prefers textboxes).
 
@@ -120,22 +128,32 @@ These happen transparently — you don't need to handle them:
 
 ## Common Patterns
 
+### Price Lookup (e-commerce)
+```bash
+webctl navigate "https://amazon.de/dp/B09HM94VDS"
+# Structured data (price, rating) + snapshot with @refs for details
+webctl stop
+```
+
+### Read Article
+```bash
+webctl navigate "https://spiegel.de" --read
+# Returns structured data + readable markdown content
+webctl stop
+```
+
+### Search and Extract
+```bash
+webctl navigate "https://duckduckgo.com" --search "query"
+# Returns search results with @refs
+webctl stop
+```
+
 ### Login
 ```bash
 webctl navigate "https://example.com/login"
 webctl do '[["type","Email","user@example.com"],["type","Password","secret"],["click","Log in"]]' --snapshot
 webctl wait 'url-contains:"/dashboard"'
-webctl stop
-```
-
-### Search and Read
-```bash
-webctl navigate "https://example.com" --search "query"
-# Or manually:
-webctl navigate "https://example.com"
-webctl type "Search" "my query" --submit
-webctl wait network-idle
-webctl snapshot --read
 webctl stop
 ```
 
@@ -146,9 +164,10 @@ webctl do '[["type","Name","John"],["type","Email","john@test.com"],["type","Cou
 webctl stop
 ```
 
-### Read Page Content
+### Find Specific Data on Complex Pages
 ```bash
-webctl navigate "https://example.com" --read
+webctl navigate "https://example.com" --grep "€|price|shipping"
+# Returns only elements matching the pattern, with @refs
 webctl stop
 ```
 

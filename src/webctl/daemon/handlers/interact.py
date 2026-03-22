@@ -481,7 +481,7 @@ async def _snapshot_after(
     request: Request, session_manager: SessionManager, session_id: str
 ) -> AsyncIterator[Response]:
     """Take a landmark-aware snapshot and yield it as items. Used by --snapshot flag."""
-    from .navigation import _build_smart_navigate_snapshot
+    from .navigation import _build_smart_navigate_snapshot, _grep_filter_responses
 
     page = session_manager.get_active_page(session_id)
     if not page:
@@ -493,6 +493,11 @@ async def _snapshot_after(
         max_name_length=80,
         auto_limit=200,
     )
+
+    # Apply grep filter if requested
+    grep_pattern = request.args.get("grep_pattern")
+    if grep_pattern:
+        responses = _grep_filter_responses(responses, grep_pattern)
 
     for resp in responses:
         yield resp

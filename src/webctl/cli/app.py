@@ -958,18 +958,26 @@ def cmd_navigate(
         "load", "--wait", "-w", help="Wait condition: load, domcontentloaded, networkidle"
     ),
     read: bool = typer.Option(
-        False, "--read", help="Return readable text content instead of a11y snapshot"
+        False, "--read", help="Return readable text content (markdown)"
     ),
     search: str | None = typer.Option(
         None, "--search", help="Find search box, type query, submit, return results"
     ),
+    snapshot: bool = typer.Option(
+        False, "--snapshot", "-s", help="Return full a11y snapshot with @refs"
+    ),
+    grep: str | None = typer.Option(
+        None, "--grep", "-g", help="Return a11y elements matching regex (implies --snapshot)"
+    ),
 ) -> None:
-    """Navigate to a URL. Auto-starts session. Returns snapshot with @refs.
+    """Navigate to a URL. Auto-starts session. Returns structured data + page summary.
 
     Examples:
-        webctl navigate "https://example.com"
-        webctl navigate "https://example.com" --read
-        webctl navigate "https://duckduckgo.com" --search "webctl"
+        webctl navigate "https://example.com"                    # structured data + summary
+        webctl navigate "https://example.com" --grep "€|price"   # filtered snapshot
+        webctl navigate "https://example.com" --snapshot          # full a11y snapshot
+        webctl navigate "https://example.com" --read              # readable markdown
+        webctl navigate "https://duckduckgo.com" --search "query" # search + snapshot
     """
     asyncio.run(
         run_command(
@@ -979,6 +987,8 @@ def cmd_navigate(
                 "wait_until": wait_until,
                 "read": read,
                 "search": search,
+                "snapshot": snapshot,
+                "grep_pattern": grep,
                 "session": _session,
             },
         )
@@ -1137,6 +1147,9 @@ def cmd_click(
     snapshot: bool = typer.Option(
         False, "--snapshot", "-S", help="Return page snapshot after action"
     ),
+    grep: str | None = typer.Option(
+        None, "--grep", "-g", help="Filter snapshot by regex (implies --snapshot)"
+    ),
 ) -> None:
     """Click an element. Accepts @ref, query, or text description.
 
@@ -1144,7 +1157,7 @@ def cmd_click(
         webctl click @e3
         webctl click "Submit"
         webctl click 'role=button name~="Submit"' --snapshot
-        webctl click "Submit" --wait network-idle
+        webctl click "Submit" --snapshot --grep "result|price"
     """
     asyncio.run(
         run_command(
@@ -1154,7 +1167,8 @@ def cmd_click(
                 "retry": retry,
                 "retry_delay": retry_delay,
                 "wait_after": wait_after,
-                "snapshot_after": snapshot,
+                "snapshot_after": snapshot or bool(grep),
+                "grep_pattern": grep,
                 "session": _session,
             },
         )
@@ -1175,6 +1189,9 @@ def cmd_type(
     snapshot: bool = typer.Option(
         False, "--snapshot", "-S", help="Return page snapshot after action"
     ),
+    grep: str | None = typer.Option(
+        None, "--grep", "-g", help="Filter snapshot by regex (implies --snapshot)"
+    ),
 ) -> None:
     """Type text into an element. Auto-detects dropdowns and checkboxes.
 
@@ -1182,7 +1199,7 @@ def cmd_type(
         webctl type @e2 "user@example.com"
         webctl type "Email" "user@example.com"
         webctl type "Country" "Germany"          # auto-selects from dropdown
-        webctl type "Search" "query" --submit --snapshot
+        webctl type "Search" "query" --submit --snapshot --grep "result"
     """
     asyncio.run(
         run_command(
@@ -1195,7 +1212,8 @@ def cmd_type(
                 "retry": retry,
                 "retry_delay": retry_delay,
                 "wait_after": wait_after,
-                "snapshot_after": snapshot,
+                "snapshot_after": snapshot or bool(grep),
+                "grep_pattern": grep,
                 "session": _session,
             },
         )

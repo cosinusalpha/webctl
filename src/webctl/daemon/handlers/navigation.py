@@ -3,6 +3,7 @@ Navigation command handlers.
 """
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -159,6 +160,29 @@ async def _build_smart_navigate_snapshot(
     return responses, stats
 
 
+def _grep_filter_responses(
+    responses: list[Response], pattern: str
+) -> list[Response]:
+    """Filter a11y ItemResponses by grep pattern on role+name. Keep non-a11y items (e.g. structured data)."""
+    try:
+        regex = re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        return responses
+
+    filtered: list[Response] = []
+    for resp in responses:
+        if not isinstance(resp, ItemResponse) or resp.view != "a11y":
+            # Keep structured data and other non-a11y items
+            filtered.append(resp)
+            continue
+        data = resp.data
+        text = f"{data.get('role', '')} {data.get('name', '')}"
+        if regex.search(text):
+            filtered.append(resp)
+    return filtered
+
+
+
 @register("navigate")
 async def handle_navigate(
     request: Request,
@@ -166,12 +190,13 @@ async def handle_navigate(
     event_emitter: EventEmitter,
     **kwargs: Any,
 ) -> AsyncIterator[Response]:
-    """Navigate to a URL. Auto-starts session if needed. Returns snapshot with @refs."""
+    """Navigate to a URL. Auto-starts session if needed. Returns structured data + a11y snapshot."""
     url = request.args.get("url")
     session_id = request.args.get("session", "default")
     wait_until = request.args.get("wait_until", "load")
     read_mode = request.args.get("read", False)
     search_query = request.args.get("search")
+    grep_pattern = request.args.get("grep_pattern")
 
     if not url:
         yield ErrorResponse(
@@ -240,9 +265,19 @@ async def handle_navigate(
 
         await event_emitter.emit_navigation_finished(page.url, page_id)
 
+        # page.title() can fail if the page is mid-navigation (e.g. DDG client-side redirect)
+        try:
+            title = await page.title()
+        except Exception:
+            await asyncio.sleep(0.5)
+            try:
+                title = await page.title()
+            except Exception:
+                title = ""
+
         summary: dict[str, Any] = {
             "url": page.url,
-            "title": await page.title(),
+            "title": title,
         }
         if cookie_result.dismissed:
             summary["cookie_banner_dismissed"] = True
@@ -266,7 +301,10 @@ async def handle_navigate(
                     await asyncio.sleep(2)
                 summary["searched"] = search_query
                 summary["url"] = page.url
-                summary["title"] = await page.title()
+                try:
+                    summary["title"] = await page.title()
+                except Exception:
+                    summary["title"] = ""
             else:
                 summary["search_warning"] = "No search box found"
 
@@ -290,12 +328,30 @@ async def handle_navigate(
             yield DoneResponse(req_id=request.req_id, ok=True, summary=summary)
             return
 
-        # Default: return landmark-aware snapshot with @refs
+        # Default: full landmark-aware a11y snapshot (with structured data prepended)
+        # --grep: same but filtered by pattern
         responses, snap_stats = await _build_smart_navigate_snapshot(
             page, session, request,
             max_name_length=80,
             auto_limit=200,
         )
+
+        if grep_pattern:
+            total_before = snap_stats.get("total", 0)
+            responses = _grep_filter_responses(responses, grep_pattern)
+            # Recount after filtering
+            filtered_count = sum(
+                1 for r in responses
+                if isinstance(r, ItemResponse) and r.view == "a11y"
+            )
+            snap_stats = {
+                "total": filtered_count,
+                "grep": grep_pattern,
+                "total_before_filter": total_before,
+            }
+            if filtered_count == 0 and total_before > 0:
+                snap_stats["hint"] = "No a11y elements matched. Try: snapshot --read"
+
         summary["elements"] = snap_stats
 
         for resp in responses:
