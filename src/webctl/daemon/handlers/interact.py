@@ -438,6 +438,7 @@ async def _snapshot_after(
         include_path_hint=False,
         interactive_only=True,
         compact_refs=True,
+        max_name_length=80,
     )
     collected: list[dict[str, Any]] = []
     async for item in extract_a11y_view(page, options):

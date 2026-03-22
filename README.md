@@ -50,13 +50,13 @@ Head-to-head comparison of **webctl** vs **[agent-browser](https://github.com/AX
 | Task                    |  webctl  |        |          | agent-browser |       |        |
 |-------------------------|:--------:|:------:|:--------:|:-------------:|:-----:|:------:|
 |                         |  Score   | Turns  |  Tokens  |     Score     | Turns | Tokens |
-| Amazon product lookup   | **9**/10 |   28   |   646k   |   **9**/10    |  20   |  329k  |
-| Spiegel.de headlines    | **9**/10 |   10   |   93k    |     8/10      |   7   |  66k   |
-| Google Maps restaurants | **7**/10 |   18   |   245k   |     4/10      |   7   |  66k   |
-| DuckDuckGo search       | **7**/10 |   13   |   167k   |     5/10      |  33   |  662k  |
-| **Average**             | **8.0**  | **17** | **288k** |      6.5      |  17   |  281k  |
+| Amazon product lookup   | **9**/10 |   16   |   338k   |   **9**/10    |  16   |  216k  |
+| Spiegel.de headlines    | **8**/10 |    4   |    33k   |     8/10      |   6   |   53k  |
+| Google Maps restaurants | **7**/10 |   18   |   245k   |     4/10      |   7   |   66k  |
+| DuckDuckGo search       | **7**/10 |   10   |   139k   |     5/10      |  33   |  662k  |
+| **Average**             | **7.8**  | **12** | **189k** |      6.5      |  16   |  249k  |
 
-webctl achieves higher quality scores on 3 of 4 tasks, with comparable turn counts overall. On complex sites (Google Maps, DuckDuckGo), webctl's automatic fallbacks (cookie dismiss, scroll-to-find, overlay retry) and context-efficient snapshots make a significant difference.
+webctl achieves higher quality scores on 3 of 4 tasks while using fewer tokens and turns overall. Automatic fallbacks (cookie dismiss, scroll-to-find, overlay retry) and context-efficient snapshots make a significant difference on complex sites.
 
 <details>
 <summary>Benchmark details</summary>

@@ -61,6 +61,13 @@ STRUCTURAL_ROLES = frozenset(
     }
 )
 
+# Combined set for navigate: interactive + landmarks + key structural (no list/listitem noise)
+NAVIGATE_ROLES = (
+    INTERACTIVE_ROLES
+    | LANDMARK_ROLES
+    | frozenset({"heading", "table", "grid", "tablist", "toolbar", "dialog", "alertdialog", "alert"})
+)
+
 
 @dataclass
 class SnapshotFilter:

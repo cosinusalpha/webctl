@@ -8,10 +8,13 @@ from typing import Any
 
 from ...protocol.messages import DoneResponse, ErrorResponse, ItemResponse, Request, Response
 from ...views.a11y import A11yExtractOptions, extract_a11y_view
+from ...views.filters import NAVIGATE_ROLES
 from ..detectors.cookie_banner import dismiss_cookie_banner
 from ..event_emitter import EventEmitter
 from ..session_manager import SessionManager
 from .registry import register
+
+_NAVIGATE_ROLES_STR = ",".join(NAVIGATE_ROLES)
 
 
 async def _build_snapshot_with_refs(
@@ -19,12 +22,17 @@ async def _build_snapshot_with_refs(
     session: Any,
     request: Request,
     interactive_only: bool = False,
+    roles: str | None = None,
+    max_name_length: int | None = None,
+    auto_limit: int | None = None,
 ) -> tuple[list[Response], dict[str, Any]]:
     """Build a snapshot with @refs, return (responses, stats)."""
     options = A11yExtractOptions(
         include_path_hint=False,
         interactive_only=interactive_only,
         compact_refs=True,
+        roles=roles,
+        max_name_length=max_name_length,
     )
 
     collected: list[dict[str, Any]] = []
@@ -34,6 +42,16 @@ async def _build_snapshot_with_refs(
         role = item.get("role", "unknown")
         stats["by_role"][role] = stats["by_role"].get(role, 0) + 1
         collected.append(item)
+
+    # Auto-limit: truncate and hint if too many elements
+    truncated = False
+    if auto_limit and len(collected) > auto_limit:
+        truncated = True
+        stats["total_before_limit"] = len(collected)
+        collected = collected[:auto_limit]
+        stats["total"] = auto_limit
+        stats["truncated"] = True
+        stats["hint"] = "Use 'snapshot --grep \"pattern\"' or '--within \"role=main\"' to narrow scope"
 
     # Store refs in session
     if session:
@@ -175,9 +193,12 @@ async def handle_navigate(
             yield DoneResponse(req_id=request.req_id, ok=True, summary=summary)
             return
 
-        # Default: return snapshot with @refs (headings + interactive)
+        # Default: return snapshot with @refs (interactive + landmarks + key structural)
         responses, snap_stats = await _build_snapshot_with_refs(
-            page, session, request, interactive_only=False
+            page, session, request,
+            roles=_NAVIGATE_ROLES_STR,
+            max_name_length=80,
+            auto_limit=200,
         )
         summary["elements"] = snap_stats
 
