@@ -251,8 +251,16 @@ async def handle_navigate(
         # from racing with our cookie dismiss below
         session._navigating_pages.add(page_id)
 
-        # Navigate
+        # Navigate — domcontentloaded is fast, then custom idle fills the gap
         await page.goto(url, wait_until=wait_until)
+
+        # Best-effort custom network idle (ignores media/websocket/eventsource)
+        page_info = session_manager.get_active_page_info(session_id)
+        if page_info and page_info.network_idle_detector:
+            try:
+                await page_info.network_idle_detector.wait(timeout_ms=5000)
+            except (TimeoutError, Exception):
+                pass  # Content is likely ready — proceed anyway
 
         # Auto-dismiss cookie banners (try twice — iframes may load late)
         await asyncio.sleep(1.5)
@@ -294,10 +302,13 @@ async def handle_navigate(
                 locator = make_locator(page, search_result.element)
                 await locator.first.fill(search_query)
                 await page.keyboard.press("Enter")
-                # Wait for results
-                try:
-                    await page.wait_for_load_state("networkidle", timeout=10000)
-                except Exception:
+                # Wait for search results to load
+                if page_info and page_info.network_idle_detector:
+                    try:
+                        await page_info.network_idle_detector.wait(timeout_ms=10000)
+                    except (TimeoutError, Exception):
+                        await asyncio.sleep(2)
+                else:
                     await asyncio.sleep(2)
                 summary["searched"] = search_query
                 summary["url"] = page.url

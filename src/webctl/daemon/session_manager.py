@@ -30,6 +30,7 @@ from ..security.domain_policy import DomainPolicy
 from .detectors.action import ActionDetector
 from .detectors.auth import AuthDetector
 from .detectors.cookie_banner import CookieBannerDismisser
+from .detectors.network_idle import NetworkIdleDetector
 from .detectors.view_change import ViewChangeDetector, ViewChangeEvent
 from .event_emitter import EventEmitter
 
@@ -43,6 +44,7 @@ class PageInfo:
     url: str
     kind: Literal["tab", "popup"]
     view_detector: ViewChangeDetector | None = None
+    network_idle_detector: NetworkIdleDetector | None = None
     console_logs: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -213,6 +215,7 @@ class SessionManager:
             )
 
         view_detector = ViewChangeDetector(page, page_id, on_view_change)
+        network_idle_detector = NetworkIdleDetector(page)
 
         page_info = PageInfo(
             page_id=page_id,
@@ -220,6 +223,7 @@ class SessionManager:
             url=page.url,
             kind=kind,
             view_detector=view_detector,
+            network_idle_detector=network_idle_detector,
         )
 
         session.pages[page_id] = page_info
@@ -273,9 +277,11 @@ class SessionManager:
         if page_id in session.pages:
             page_info = session.pages[page_id]
 
-            # Stop view detector
+            # Stop detectors
             if page_info.view_detector:
                 await page_info.view_detector.stop()
+            if page_info.network_idle_detector:
+                page_info.network_idle_detector.dispose()
 
             del session.pages[page_id]
 

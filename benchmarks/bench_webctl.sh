@@ -26,11 +26,14 @@ echo "=== webctl benchmark: $TASK_NAME ==="
 echo "Task: $TASK_PROMPT"
 echo ""
 
-# Clean slate: stop any existing session/daemon
-uv run --project "$PROJECT_DIR" webctl stop 2>/dev/null || true
+# Use a unique session per task so parallel runs don't collide
+SESSION="bench_${TASK_NUM}"
+
+# Clean slate: stop this task's session
+uv run --project "$PROJECT_DIR" webctl -s "$SESSION" stop 2>/dev/null || true
 sleep 0.5
 
-WEBCTL="uv run --project $PROJECT_DIR webctl"
+WEBCTL="uv run --project $PROJECT_DIR webctl -s $SESSION"
 
 # Enable command logging if not already set
 export WEBCTL_LOG="${WEBCTL_LOG:-$OUT_DIR/webctl_${TASK_NAME}.log}"

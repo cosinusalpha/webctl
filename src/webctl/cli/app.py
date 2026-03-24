@@ -955,7 +955,7 @@ def cmd_close_page(
 def cmd_navigate(
     url: str = typer.Argument(..., help="URL to navigate to"),
     wait_until: str = typer.Option(
-        "load", "--wait", "-w", help="Wait condition: load, domcontentloaded, networkidle"
+        "domcontentloaded", "--wait", "-w", help="Wait condition: domcontentloaded, load, networkidle"
     ),
     read: bool = typer.Option(
         False, "--read", help="Return readable text content (markdown)"

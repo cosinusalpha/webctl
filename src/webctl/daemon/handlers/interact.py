@@ -562,7 +562,9 @@ async def handle_click(
         if wait_after:
             from .wait import perform_wait
 
-            await perform_wait(page, wait_after, timeout=30000)
+            pi = session_manager.get_active_page_info(session_id)
+            nid = pi.network_idle_detector if pi else None
+            await perform_wait(page, wait_after, timeout=30000, network_idle_detector=nid)
             summary["waited_for"] = wait_after
 
         yield DoneResponse(
@@ -679,7 +681,9 @@ async def handle_type(
         if wait_after:
             from .wait import perform_wait
 
-            await perform_wait(page, wait_after, timeout=30000)
+            pi = session_manager.get_active_page_info(session_id)
+            nid = pi.network_idle_detector if pi else None
+            await perform_wait(page, wait_after, timeout=30000, network_idle_detector=nid)
             summary["waited_for"] = wait_after
 
         yield DoneResponse(
@@ -1313,7 +1317,9 @@ async def handle_do(
             elif action == "wait":
                 from .wait import perform_wait
 
-                await perform_wait(page, target, timeout=30000)
+                pi = session_manager.get_active_page_info(session_id)
+                nid = pi.network_idle_detector if pi else None
+                await perform_wait(page, target, timeout=30000, network_idle_detector=nid)
                 completed.append({"action": "wait", "until": target, "ok": True})
 
             else:

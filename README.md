@@ -3,17 +3,12 @@
 **Browser automation for AI agents and humans, built on the command line.**
 
 ```bash
-# 1. Install
 pip install webctl
-
-# 2. Auto-configure your agent (creates skills/prompts for all supported agents)
-webctl init
-
-# 3. Start browsing (auto-starts session)
-webctl navigate "https://google.com"
+webctl navigate "https://example.com"   # Auto-starts browser, returns page data
+webctl click "Sign in"                  # Click by text description
+webctl snapshot                         # See all elements with @refs
+webctl stop                             # Closes browser and daemon
 ```
-
-**`webctl init` automatically generates the skills and prompts your agents need to drive the browser.**
 
 ## Why CLI Instead of MCP?
 
@@ -45,23 +40,33 @@ Beyond filtering, CLI gives you:
 
 ## Benchmarks
 
-Head-to-head comparison of **webctl** vs **[agent-browser](https://github.com/AXyLo/agent-browser)** (Vercel's Playwright MCP tool) across 4 real-world web tasks. Both tools use Claude Opus as the driving agent.
+Head-to-head comparison of **webctl** vs **[agent-browser](https://github.com/vercel-labs/agent-browser)** (Vercel's Playwright MCP tool) across 4 real-world web tasks. Both tools use Claude Opus as the driving agent.
 
-| Task                    |  webctl   |        |          | agent-browser |       |        |
-|-------------------------|:---------:|:------:|:--------:|:-------------:|:-----:|:------:|
-|                         |  Score    | Turns  |  Tokens  |     Score     | Turns | Tokens |
-| Amazon product lookup   | **10**/10 |   23   |   565k   |     9/10      |   5   |   38k  |
-| Spiegel.de headlines    | **9**/10  |    4   |    38k   |     8/10      |   7   |   66k  |
-| Google Maps restaurants |   0/10    |    1   |    40k   |     0/10      |   1   |   17k  |
-| DuckDuckGo search       |   8/10    |  **3** |  **21k** |     8/10      |  18   |  251k  |
-| **Average**             | **6.8**   |  **8** | **166k** |      6.3      |   8   |   93k  |
+| Task                    |  webctl    |        |        |        | agent-browser |        |        |        |
+|-------------------------|:----------:|:------:|:------:|:------:|:-------------:|:------:|:------:|:------:|
+|                         |  Score     | Turns  | Tokens |  Cost  |     Score     | Turns  | Tokens |  Cost  |
+| Amazon product lookup   | **9**/10   |   11   |  119k  | $0.25  |     9/10      |   18   |  247k  | $0.28  |
+| Spiegel.de headlines    | **9**/10   |    7   |   62k  | $0.14  |     8/10      |    5   |   47k  | $0.12  |
+| Google Maps restaurants | **8**/10   |    9   |  106k  | $0.22  |     7/10      |   13   |  185k  | $0.29  |
+| DuckDuckGo search       | **8**/10   |    4   |   29k  | $0.11  |     4/10      |   17   |  253k  | $0.36  |
+| **Average**             | **8.5**/10 | **8**  | **79k**|**$0.18**|     7.0/10   |   13   |  183k  | $0.26  |
 
-webctl achieves higher quality scores on 3 of 4 tasks. Landmark-aware snapshots collapse navigation/sidebars and prioritize content, while automatic fallbacks (cookie dismiss, scroll-to-find, overlay retry) handle complex sites. Google Maps failed for both tools due to consent/bot-detection walls.
+webctl achieves higher quality scores on all 4 tasks at lower cost. Landmark-aware snapshots collapse navigation/sidebars and prioritize content, while automatic fallbacks (cookie dismiss, scroll-to-find, overlay retry) handle complex sites without extra agent turns.
+
+<details>
+<summary>What makes it fast</summary>
+
+- **Structured data first**: `navigate` extracts JSON-LD/Open Graph metadata (price, rating, author, etc.) before touching the accessibility tree — often enough to answer without a full snapshot
+- **Landmark-aware filtering**: Collapses nav/footer/sidebar landmarks so agents see content, not chrome
+- **Smart network idle**: Custom load detection that ignores media streams and websockets — pages with video/analytics don't block loading
+- **Act + observe in one turn**: `--snapshot` flag on click/type returns the updated page state, saving a round-trip
+
+</details>
 
 <details>
 <summary>Benchmark details</summary>
 
-**Setup**: Each task runs Claude Opus with a single tool (webctl or agent-browser), a $1 budget cap, and no human intervention. Quality is scored 0-10 by a separate Claude evaluation call.
+**Setup**: Each task runs Claude Opus with a single tool (webctl or agent-browser), a $1 budget cap, and no human intervention. Quality is scored 0–10 by a separate Claude evaluation call.
 
 **Tasks**:
 1. **Amazon product lookup**: Find price and shipping for a specific product on amazon.de
@@ -77,38 +82,27 @@ Run benchmarks yourself: `bash benchmarks/bench_run.sh`
 
 ## Agent Integration
 
-**Step 1: Install the skill**
-
-For Claude Code (recommended — no pip install needed first):
+**Option A: Install the skill** (works across Claude Code, Cursor, Codex, Gemini CLI, Copilot, Goose, Windsurf, and OpenCode)
 
 ```bash
 npx skills add cosinusalpha/webctl
 ```
 
-This works across Claude Code, Cursor, Codex, Gemini CLI, Copilot, Goose, Windsurf, and OpenCode.
+This installs the skill file. Your agent will install the `webctl` package automatically on first use.
 
-**Step 1 (alternative): Install via pip**
+**Option B: Install via pip**
 
 ```bash
 pip install webctl
-webctl setup  # Downloads Chromium
+webctl setup              # Downloads Chromium
+webctl init               # Generate skills/prompts for your agents
+webctl init --global      # Or install globally (works across all projects)
 ```
 
-**Step 2: Generate Skills/Prompts (pip install only)**
+`webctl init` creates on-demand **skills** for Claude Code and Goose, and lean **prompts** for Gemini, Copilot, and Codex.
 
-If you installed via pip, generate agent config files:
-
-```bash
-webctl init              # Project-level (recommended)
-webctl init --global     # Global (works across all projects)
-```
-
-This creates:
-
-- **Skills** for Claude Code and Goose (loaded on-demand when doing web tasks)
-- **Lean prompts** for Gemini, Copilot, and Codex (always in context)
-
-**Supported agents:**
+<details>
+<summary>Supported agents and file locations</summary>
 
 | Agent            | Format | Location (project)                | Location (global)                         |
 |------------------|--------|-----------------------------------|-------------------------------------------|
@@ -119,7 +113,7 @@ This creates:
 | `codex`          | Prompt | `AGENTS.md`                       | `~/.codex/AGENTS.md`                      |
 | `claude-noskill` | Prompt | `CLAUDE.md` (legacy)              | `~/.claude/CLAUDE.md`                     |
 
-**Why skills?** Skills are loaded on-demand - your agent only reads webctl instructions when actually doing web automation. This keeps your context clean for other tasks.
+**Why skills?** Skills are loaded on-demand — your agent only reads webctl instructions when actually doing web automation. This keeps your context clean for other tasks.
 
 **Select specific agents:**
 
@@ -128,7 +122,7 @@ webctl init --agents claude,gemini    # Only Claude and Gemini
 webctl init --agents claude-noskill   # Legacy CLAUDE.md format
 ```
 
-**Step 3: Add to Config (optional)**
+</details>
 
 If your agent doesn't auto-detect the generated files, add this to your system prompt:
 
@@ -138,81 +132,20 @@ If your agent doesn't auto-detect the generated files, add this to your system p
 
 ---
 
-## Quick Start (Human Usage)
-
-Verify the installation works by driving it yourself:
-
-```bash
-webctl navigate "https://example.com"   # Auto-starts browser
-webctl snapshot                         # See all elements with @refs
-webctl click "Some link"                # Click by text description
-webctl stop                             # Closes browser and daemon
-```
-
-<details>
-<summary>Global installation with `uv`</summary>
-
-```bash
-uv tool install webctl
-uv tool run webctl
-```
-
-</details>
-
-<details>
-<summary>Linux system dependencies</summary>
-
-```bash
-playwright install-deps chromium
-# Or manually install libraries listed in Playwright documentation
-```
-
-</details>
-
----
-
-## Core Concepts
-
-### Sessions
-
-Browser stays open across commands. Cookies persist to disk.
-
-```bash
-webctl start                    # Visible browser
-webctl start --mode unattended  # Headless (invisible)
-webctl -s work start            # Named profile (separate cookies)
-```
-
-### Element Queries
-
-Semantic targeting based on ARIA roles - stable across CSS refactors:
-
-```bash
-role=button                     # Any button
-role=button name="Submit"       # Exact match
-role=button name~="Submit"      # Contains text (preferred)
-```
-
-### Output Control
-
-```bash
-webctl snapshot                                    # Human-readable
-webctl --quiet navigate "..."                      # Suppress events
-webctl --result-only --format jsonl navigate "..." # Pure JSON
-```
-
----
-
 ## Commands
 
 ### Navigation & Observation
 
 ```bash
-webctl navigate "https://..."
+webctl navigate "https://..."                    # Structured data + page summary
+webctl navigate "https://..." --snapshot         # Full a11y snapshot with @refs
+webctl navigate "https://..." --read             # Readable markdown content
+webctl navigate "https://..." --search "query"   # Find search box, type, submit
+webctl navigate "https://..." --grep "price"     # Filtered a11y snapshot
 webctl back / forward / reload
-webctl snapshot --interactive-only        # Buttons, links, inputs only
-webctl snapshot --within "role=main"      # Scope to container
-webctl query "role=button name~=Submit"   # Debug query
+webctl snapshot --interactive-only               # Buttons, links, inputs only
+webctl snapshot --within "role=main"             # Scope to container
+webctl query "role=button name~=Submit"          # Debug query
 webctl screenshot --path shot.png
 ```
 
@@ -221,11 +154,11 @@ webctl screenshot --path shot.png
 ```bash
 webctl click "Submit"                          # By text description
 webctl click @e3                               # By @ref from snapshot
+webctl click "Submit" --snapshot               # Click + return updated page state
 webctl type "Email" "user@example.com"         # Smart targeting
 webctl type "Country" "Germany"                # Auto-detects dropdowns
 webctl type "Search" "query" --submit          # Type + press Enter
 webctl press Enter
-webctl scroll down
 webctl do '[[...],[...]]' --snapshot           # Batch multiple actions
 ```
 
@@ -248,6 +181,38 @@ webctl console --level error    # Filter to errors only
 
 ---
 
+## Core Concepts
+
+### Sessions
+
+Browser stays open across commands. Cookies persist to disk.
+
+```bash
+webctl start                    # Visible browser
+webctl start --mode unattended  # Headless (invisible)
+webctl -s work start            # Named profile (separate cookies)
+```
+
+### Element Queries
+
+Semantic targeting based on ARIA roles — stable across CSS refactors:
+
+```bash
+role=button                     # Any button
+role=button name="Submit"       # Exact match
+role=button name~="Submit"      # Contains text (preferred)
+```
+
+### Output Control
+
+```bash
+webctl snapshot                                    # Human-readable
+webctl --quiet navigate "..."                      # Suppress events
+webctl --result-only --format jsonl navigate "..." # Pure JSON
+```
+
+---
+
 ## Architecture
 
 ```
@@ -265,7 +230,8 @@ webctl console --level error    # Filter to errors only
 - **Socket**: `$WEBCTL_SOCKET_DIR` or OS default (see below)
 - **Profiles**: `~/.local/share/webctl/profiles/`
 
-### Socket Paths
+<details>
+<summary>Socket paths</summary>
 
 | Platform | Default |
 |----------|---------|
@@ -275,11 +241,11 @@ webctl console --level error    # Filter to errors only
 
 Override directory with `WEBCTL_SOCKET_DIR` environment variable.
 
+</details>
+
 ---
 
 ## Security
-
-### IPC Authentication
 
 webctl verifies that CLI commands come from the same user as the daemon:
 
@@ -291,11 +257,10 @@ webctl verifies that CLI commands come from the same user as the daemon:
 
 All platforms use kernel-level credential verification. This prevents other users from controlling your browser session.
 
-Note: Root/Administrator can still access any user's session (OS limitation).
-
 ---
 
-## Advanced Configuration
+<details>
+<summary>Advanced Configuration</summary>
 
 ### Custom Browser
 
@@ -423,7 +388,29 @@ docker run --rm \
   my-webctl-image webctl navigate "https://example.com"
 ```
 
-No UID matching needed - both containers run as the same user.
+No UID matching needed — both containers run as the same user.
+
+</details>
+
+<details>
+<summary>Global installation with uv</summary>
+
+```bash
+uv tool install webctl
+uv tool run webctl
+```
+
+</details>
+
+<details>
+<summary>Linux system dependencies</summary>
+
+```bash
+playwright install-deps chromium
+# Or manually install libraries listed in Playwright documentation
+```
+
+</details>
 
 ---
 

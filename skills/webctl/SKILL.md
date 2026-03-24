@@ -1,15 +1,19 @@
 ---
 name: webctl
 description: Browser automation via CLI. Use when browsing websites, filling forms, extracting data from web pages, taking screenshots, or automating web interactions. Preferred over MCP browser tools for better context control.
-allowed-tools: Bash(webctl *), Bash(webctl), Read
+allowed-tools: Bash(webctl *), Bash(webctl), Bash(pip install *), Read
 ---
 
 # webctl - Browser Automation CLI
 
+## Setup
+
+If `webctl` is not installed, run: `pip install webctl && webctl setup`
+
 ## Workflow
 
 ```bash
-# 1. Navigate — returns structured data + interactive elements with @refs
+# 1. Navigate — returns structured data + page summary
 webctl navigate "https://example.com"
 
 # 2. Interact using @refs or text descriptions
@@ -24,7 +28,7 @@ webctl stop
 
 | Goal | Command |
 |------|---------|
-| Browse / interact with a page | `navigate URL` — returns structured data + a11y snapshot with @refs |
+| Browse / interact with a page | `navigate URL` — returns structured data + page summary (add `--snapshot` for full a11y with @refs) |
 | Read article content | `navigate URL --read` — returns readable markdown |
 | Search a website | `navigate URL --search "query"` — types query + returns results |
 | Filter specific elements | `navigate URL --grep "€\|price"` — filtered a11y snapshot |
@@ -33,13 +37,14 @@ webctl stop
 
 ### navigate - Go to URL
 ```bash
-webctl navigate "https://example.com"                        # structured data + a11y snapshot with @refs (default)
+webctl navigate "https://example.com"                        # structured data + page summary (default)
+webctl navigate "https://example.com" --snapshot              # full a11y snapshot with @refs
 webctl navigate "https://example.com" --grep "€|price"       # filtered a11y snapshot
 webctl navigate "https://example.com" --read                  # readable text content
 webctl navigate "https://duckduckgo.com" --search "query"     # search + results snapshot
 ```
 
-The default returns **structured data** (JSON-LD, Open Graph — price, rating, etc.) plus the full a11y snapshot with @refs for interaction.
+The default returns **structured data** (JSON-LD, Open Graph — price, rating, etc.) plus a page summary. Add `--snapshot` for the full a11y snapshot with @refs for interaction.
 
 ### snapshot - Re-scan current page
 ```bash
