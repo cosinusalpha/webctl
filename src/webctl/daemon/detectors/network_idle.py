@@ -48,9 +48,7 @@ class NetworkIdleDetector:
     def _start_timer(self) -> None:
         self._cancel_timer()
         loop = asyncio.get_event_loop()
-        self._idle_timer = loop.call_later(
-            self._idle_ms / 1000.0, self._fire_idle
-        )
+        self._idle_timer = loop.call_later(self._idle_ms / 1000.0, self._fire_idle)
 
     def _fire_idle(self) -> None:
         self._idle_timer = None

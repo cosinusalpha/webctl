@@ -64,7 +64,9 @@ class SessionState:
     _page_counter: int = 0
     _dismissed_domains: set[str] = field(default_factory=set)  # Track domains where we dismissed
     _navigating_pages: set[str] = field(default_factory=set)  # Pages with active navigate command
-    _emitted_actions: set[str] = field(default_factory=set)  # Rate-limit action events: "page_id:description"
+    _emitted_actions: set[str] = field(
+        default_factory=set
+    )  # Rate-limit action events: "page_id:description"
     # Ref store: maps @e1 -> {role, name, ...} for compact ref-based interactions
     _ref_counter: int = 0
     _refs: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -117,9 +119,7 @@ class SessionManager:
         resolved_mode = mode or WebctlConfig.load().default_mode
         cfg = WebctlConfig.load()
         policy = cfg.domain_policy.policy if cfg.domain_policy.enabled else None
-        return await self.create_session(
-            session_id, mode=resolved_mode, domain_policy=policy
-        )
+        return await self.create_session(session_id, mode=resolved_mode, domain_policy=policy)
 
     async def _ensure_playwright(self) -> None:
         if self._playwright is None:

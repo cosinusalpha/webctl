@@ -183,13 +183,22 @@ async def _extract_structured_data(page: Page) -> str:
                     lines.append(f"- Publisher: {publisher}")
 
             # --- Local businesses / Restaurants ---
-            elif ld_type in ("LocalBusiness", "Restaurant", "FoodEstablishment",
-                             "CafeOrCoffeeShop", "BarOrPub", "Store"):
+            elif ld_type in (
+                "LocalBusiness",
+                "Restaurant",
+                "FoodEstablishment",
+                "CafeOrCoffeeShop",
+                "BarOrPub",
+                "Store",
+            ):
                 lines.append(f"- **{ld_type}**: {item.get('name', 'N/A')}")
                 addr = item.get("address", {})
                 if isinstance(addr, dict):
-                    parts = [addr.get("streetAddress", ""), addr.get("postalCode", ""),
-                             addr.get("addressLocality", "")]
+                    parts = [
+                        addr.get("streetAddress", ""),
+                        addr.get("postalCode", ""),
+                        addr.get("addressLocality", ""),
+                    ]
                     addr_str = ", ".join(p for p in parts if p)
                     if addr_str:
                         lines.append(f"- Address: {addr_str}")

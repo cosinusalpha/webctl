@@ -418,9 +418,7 @@ def make_locator(page: Page, element: dict[str, Any]) -> Any:
     role = element.get("role")
     name = element.get("name")
     return (
-        page.get_by_role(cast(Any, role), name=name)
-        if name
-        else page.get_by_role(cast(Any, role))
+        page.get_by_role(cast(Any, role), name=name) if name else page.get_by_role(cast(Any, role))
     )
 
 
@@ -452,7 +450,9 @@ async def _snapshot_after(
 
     session = session_manager.get_session(session_id)
     responses, stats = await _build_smart_navigate_snapshot(
-        page, session, request,
+        page,
+        session,
+        request,
         max_name_length=80,
         auto_limit=200,
     )
@@ -730,8 +730,6 @@ async def handle_set_value(
             code="set_value_failed",
             details={"query": query},
         )
-
-
 
 
 @register("press")

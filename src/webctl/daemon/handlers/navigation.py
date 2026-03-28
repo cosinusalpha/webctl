@@ -64,9 +64,11 @@ async def _build_smart_navigate_snapshot(
     for item in items:
         name = item.get("name", "")
         if name:
-            item["name"] = redact_if_sensitive(name, item.get("role") == "textbox" and "password" in name.lower())
+            item["name"] = redact_if_sensitive(
+                name, item.get("role") == "textbox" and "password" in name.lower()
+            )
             if max_name_length and len(item["name"]) > max_name_length:
-                item["name"] = item["name"][:max_name_length - 3] + "..."
+                item["name"] = item["name"][: max_name_length - 3] + "..."
 
     # Step 4: Build stats
     stats: dict[str, Any] = {"total": len(items), "by_role": {}}
@@ -80,7 +82,9 @@ async def _build_smart_navigate_snapshot(
         items = items[:auto_limit]
         stats["total"] = auto_limit
         stats["truncated"] = True
-        stats["hint"] = "Use 'snapshot --grep \"pattern\"' or '--within \"role=main\"' to narrow scope"
+        stats["hint"] = (
+            "Use 'snapshot --grep \"pattern\"' or '--within \"role=main\"' to narrow scope"
+        )
 
     # Step 6: Remove internal _depth and assign refs
     for item in items:
@@ -102,11 +106,13 @@ async def _build_smart_navigate_snapshot(
 
     # Prepend structured data (JSON-LD/OG) as a text item if available
     if structured_data:
-        responses.append(ItemResponse(
-            req_id=request.req_id,
-            view="md",
-            data={"content": structured_data.strip(), "title": "", "url": ""},
-        ))
+        responses.append(
+            ItemResponse(
+                req_id=request.req_id,
+                view="md",
+                data={"content": structured_data.strip(), "title": "", "url": ""},
+            )
+        )
 
     for item in items:
         responses.append(ItemResponse(req_id=request.req_id, view="a11y", data=item))
@@ -114,9 +120,7 @@ async def _build_smart_navigate_snapshot(
     return responses, stats
 
 
-def _grep_filter_responses(
-    responses: list[Response], pattern: str
-) -> list[Response]:
+def _grep_filter_responses(responses: list[Response], pattern: str) -> list[Response]:
     """Filter a11y ItemResponses by grep pattern on role+name. Keep non-a11y items (e.g. structured data)."""
     try:
         regex = re.compile(pattern, re.IGNORECASE)
@@ -134,7 +138,6 @@ def _grep_filter_responses(
         if regex.search(text):
             filtered.append(resp)
     return filtered
-
 
 
 @register("navigate")
@@ -296,7 +299,9 @@ async def handle_navigate(
         # Default: full landmark-aware a11y snapshot (with structured data prepended)
         # --grep: same but filtered by pattern
         responses, snap_stats = await _build_smart_navigate_snapshot(
-            page, session, request,
+            page,
+            session,
+            request,
             max_name_length=80,
             auto_limit=200,
         )
@@ -306,8 +311,7 @@ async def handle_navigate(
             responses = _grep_filter_responses(responses, grep_pattern)
             # Recount after filtering
             filtered_count = sum(
-                1 for r in responses
-                if isinstance(r, ItemResponse) and r.view == "a11y"
+                1 for r in responses if isinstance(r, ItemResponse) and r.view == "a11y"
             )
             snap_stats = {
                 "total": filtered_count,

@@ -65,7 +65,9 @@ STRUCTURAL_ROLES = frozenset(
 NAVIGATE_ROLES = (
     INTERACTIVE_ROLES
     | LANDMARK_ROLES
-    | frozenset({"heading", "table", "grid", "tablist", "toolbar", "dialog", "alertdialog", "alert"})
+    | frozenset(
+        {"heading", "table", "grid", "tablist", "toolbar", "dialog", "alertdialog", "alert"}
+    )
 )
 
 # Extended set for main landmark content: includes article/feed/text/img so that
@@ -176,7 +178,9 @@ _HIDE_LANDMARKS = frozenset({"contentinfo"})
 _PRIORITY_ROLES = frozenset({"dialog", "alertdialog", "alert"})
 
 
-def landmark_aware_filter(items: list[dict[str, Any]], allowed_roles: frozenset[str] | None = None) -> list[dict[str, Any]]:
+def landmark_aware_filter(
+    items: list[dict[str, Any]], allowed_roles: frozenset[str] | None = None
+) -> list[dict[str, Any]]:
     """Filter items by landmark context for a smart navigate snapshot.
 
     Priority order in output:
@@ -302,7 +306,14 @@ def landmark_aware_filter(items: list[dict[str, Any]], allowed_roles: frozenset[
             name = lm.get("name", "")
             lm["name"] = f"{name} ({count} items)" if name else f"({count} items)"
 
-    return priority_items + search_items + main_items + compact_items + collapsed_landmarks + orphan_items
+    return (
+        priority_items
+        + search_items
+        + main_items
+        + compact_items
+        + collapsed_landmarks
+        + orphan_items
+    )
 
 
 # Roles whose children should be collapsed when there are too many

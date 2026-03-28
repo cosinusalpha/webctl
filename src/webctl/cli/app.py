@@ -120,9 +120,7 @@ async def ensure_daemon(session_id: str) -> bool:
     console.print("[dim]Troubleshooting tips:[/dim]")
     console.print("[dim]  - Run 'webctl setup' to ensure the browser is installed[/dim]")
     console.print("[dim]  - Run 'webctl doctor' to check your environment[/dim]")
-    console.print(
-        "[dim]  - In headless environments, use: webctl start --mode unattended[/dim]"
-    )
+    console.print("[dim]  - In headless environments, use: webctl start --mode unattended[/dim]")
     return False
 
 
@@ -131,7 +129,10 @@ async def run_command(command: str, args: dict[str, Any]) -> None:
     log_path = os.environ.get("WEBCTL_LOG")
     log_file = open(log_path, "a") if log_path else None  # noqa: SIM115
     formatter = OutputFormatter(
-        format=_format, quiet=_quiet, result_only=_result_only, force=_force,
+        format=_format,
+        quiet=_quiet,
+        result_only=_result_only,
+        force=_force,
         log_file=log_file,
     )
 
@@ -545,7 +546,6 @@ def _load_skill_content() -> str:
 SKILL_CONTENT = _load_skill_content()
 
 
-
 @app.command("agent-prompt")
 def cmd_agent_prompt(
     format: str = typer.Option(
@@ -955,11 +955,12 @@ def cmd_close_page(
 def cmd_navigate(
     url: str = typer.Argument(..., help="URL to navigate to"),
     wait_until: str = typer.Option(
-        "domcontentloaded", "--wait", "-w", help="Wait condition: domcontentloaded, load, networkidle"
+        "domcontentloaded",
+        "--wait",
+        "-w",
+        help="Wait condition: domcontentloaded, load, networkidle",
     ),
-    read: bool = typer.Option(
-        False, "--read", help="Return readable text content (markdown)"
-    ),
+    read: bool = typer.Option(False, "--read", help="Return readable text content (markdown)"),
     search: str | None = typer.Option(
         None, "--search", help="Find search box, type query, submit, return results"
     ),
@@ -1228,9 +1229,7 @@ def cmd_press(
     ),
 ) -> None:
     """Press a key."""
-    asyncio.run(
-        run_command("press", {"key": key, "snapshot_after": snapshot, "session": _session})
-    )
+    asyncio.run(run_command("press", {"key": key, "snapshot_after": snapshot, "session": _session}))
 
 
 @app.command("select")
