@@ -22,7 +22,6 @@ async def handle_prompt_secret(
     """
     session_id = request.args.get("session", "default")
     prompt = request.args.get("prompt", "Please enter the secret:")
-    request.args.get("timeout", 300000)  # 5 minutes default
 
     session = session_manager.get_session(session_id)
     if not session:

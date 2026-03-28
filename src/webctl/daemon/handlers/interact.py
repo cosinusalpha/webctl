@@ -1,5 +1,5 @@
 """
-Interaction command handlers (click, type, scroll, etc.).
+Interaction command handlers (click, type, etc.).
 """
 
 import asyncio
@@ -15,6 +15,7 @@ from ...exceptions import AmbiguousTargetError, NoMatchError, ParseError
 from ...protocol.messages import DoneResponse, ErrorResponse, Request, Response
 from ...query.parser import parse_query
 from ...query.resolver import QueryResolver
+from ...views.filters import INTERACTIVE_ROLES
 from ..session_manager import SessionManager
 from .error_screenshot import capture_error_screenshot
 from .registry import register
@@ -41,10 +42,6 @@ async def with_retry(
     raise RuntimeError("Retry failed with no error")
 
 
-# Aria role type from Playwright
-AriaRole = str  # Playwright uses Literal type, we use str for flexibility
-
-
 @dataclass
 class ResolveError:
     """Detailed error info from element resolution."""
@@ -60,7 +57,6 @@ class ResolveSuccess:
     """Successful resolution result."""
 
     element: dict[str, Any]
-    all_matches: list[dict[str, Any]] | None = None
 
 
 async def resolve_element_detailed(
@@ -69,7 +65,6 @@ async def resolve_element_detailed(
     """Resolve a query to a single element with detailed error info."""
     from ...views.a11y import parse_aria_snapshot
 
-    # Get snapshot
     try:
         snapshot_str = await page.locator("body").aria_snapshot()
     except Exception as e:
@@ -89,10 +84,9 @@ async def resolve_element_detailed(
             ],
         )
 
-    # Parse snapshot
     items = parse_aria_snapshot(snapshot_str)
 
-    # Collect available roles and names for suggestions
+    # For error suggestions
     available_roles: set[str] = set()
     available_names: list[str] = []
     for item in items:
@@ -101,7 +95,6 @@ async def resolve_element_detailed(
         if item.get("name"):
             available_names.append(item["name"])
 
-    # Parse query
     try:
         query = parse_query(query_str)
     except ParseError as e:
@@ -115,7 +108,6 @@ async def resolve_element_detailed(
             ],
         )
 
-    # Extract role/name from query for better suggestions
     query_role = None
     query_name = None
     role_match = re.search(r"role=(\w+)", query_str)
@@ -125,22 +117,17 @@ async def resolve_element_detailed(
     if name_match:
         query_name = name_match.group(1)
 
-    # Create tree and resolve
     tree: dict[str, Any] = {"role": "root", "children": items}
     resolver = QueryResolver(tree, strict=strict)
 
     try:
         result = resolver.resolve(query)
         if result.count > 0:
-            return ResolveSuccess(
-                element=result.matches[0],
-                all_matches=result.matches if result.count > 1 else None,
-            )
+            return ResolveSuccess(element=result.matches[0])
     except NoMatchError:
         suggestions = []
         similar_elements = []
 
-        # Role suggestion
         if query_role and query_role not in available_roles:
             similar_roles = get_close_matches(query_role, list(available_roles), n=3, cutoff=0.6)
             if similar_roles:
@@ -210,24 +197,286 @@ async def resolve_element_detailed(
     )
 
 
-async def resolve_element(page: Page, query_str: str, strict: bool = True) -> dict[str, Any] | None:
-    """Resolve a query to a single element (simple API for backward compat)."""
-    result = await resolve_element_detailed(page, query_str, strict)
+# --- Role categories for implicit resolution ---
+CLICKABLE_ROLES = frozenset({"button", "link", "menuitem", "tab", "option", "treeitem", "switch"})
+TYPEABLE_ROLES = frozenset({"textbox", "searchbox", "combobox", "spinbutton", "listbox"})
+CHECKABLE_ROLES = frozenset({"checkbox", "radio", "switch"})
+
+
+async def resolve_searchbox(page: Page) -> ResolveSuccess | ResolveError:
+    """Find a search box by ARIA role/landmark, language-independent.
+
+    Resolution order:
+    1. Unique role=searchbox on the page
+    2. textbox/combobox/searchbox inside a search landmark
+    3. Fall back to text-based matching for "Search"
+    """
+    from ...views.a11y import parse_aria_snapshot
+
+    try:
+        snapshot_str = await page.locator("body").aria_snapshot()
+    except Exception as e:
+        return ResolveError(
+            code="snapshot_failed",
+            message=f"Failed to get page snapshot: {e}",
+            suggestions=["Try waiting for the page to load"],
+        )
+
+    if not snapshot_str:
+        return ResolveError(
+            code="empty_snapshot",
+            message="Page snapshot is empty",
+            suggestions=["The page may still be loading"],
+        )
+
+    items = parse_aria_snapshot(snapshot_str)
+
+    # 1. Unique searchbox role
+    searchboxes = [i for i in items if i.get("role") == "searchbox"]
+    if len(searchboxes) == 1:
+        return ResolveSuccess(element=searchboxes[0])
+
+    # 2. Typeable element inside a search landmark
+    search_landmark_depth: int | None = None
+    for i in items:
+        if i.get("role") == "search":
+            search_landmark_depth = i.get("_depth", 0)
+            continue
+        if search_landmark_depth is not None:
+            # Still inside the search landmark (deeper depth)
+            if i.get("_depth", 0) <= search_landmark_depth:
+                search_landmark_depth = None  # exited the landmark
+                continue
+            if i.get("role") in TYPEABLE_ROLES:
+                return ResolveSuccess(element=i)
+
+    # 3. Fall back to text-based matching
+    return await resolve_by_description(
+        page, "Search", frozenset({"searchbox", "textbox", "combobox"})
+    )
+
+
+def _is_query_syntax(target: str) -> bool:
+    """Check if target looks like query syntax (role=X, name=Y, etc.)."""
+    return bool(re.search(r"\b(role|name|text|id)([~]?=)", target))
+
+
+async def resolve_by_description(
+    page: Page,
+    description: str,
+    preferred_roles: frozenset[str] | None = None,
+) -> ResolveSuccess | ResolveError:
+    """Resolve a plain text description to an interactive element via fuzzy matching."""
+    from ...views.a11y import parse_aria_snapshot
+
+    try:
+        snapshot_str = await page.locator("body").aria_snapshot()
+    except Exception as e:
+        return ResolveError(
+            code="snapshot_failed",
+            message=f"Failed to get page snapshot: {e}",
+            suggestions=["Try waiting for the page to load"],
+        )
+
+    if not snapshot_str:
+        return ResolveError(
+            code="empty_snapshot",
+            message="Page snapshot is empty",
+            suggestions=["The page may still be loading"],
+        )
+
+    items = parse_aria_snapshot(snapshot_str)
+    interactive = [i for i in items if i.get("role") in INTERACTIVE_ROLES]
+    lower_desc = description.lower()
+
+    # 1. Exact name match (case-insensitive)
+    exact = [i for i in interactive if i.get("name", "").lower() == lower_desc]
+    if len(exact) == 1:
+        return ResolveSuccess(element=exact[0])
+
+    # 2. Substring match
+    substring = [i for i in interactive if lower_desc in i.get("name", "").lower()]
+
+    # Prefer matches in preferred roles
+    if preferred_roles and len(substring) > 1:
+        preferred = [i for i in substring if i.get("role") in preferred_roles]
+        if len(preferred) == 1:
+            return ResolveSuccess(element=preferred[0])
+        if preferred:
+            substring = preferred
+
+    if len(substring) == 1:
+        return ResolveSuccess(element=substring[0])
+
+    if len(substring) > 1:
+        candidates = [
+            {"ref": f"@e{idx}", "role": m.get("role"), "name": m.get("name", "")[:60]}
+            for idx, m in enumerate(substring[:5], 1)
+        ]
+        return ResolveError(
+            code="ambiguous",
+            message=f"'{description}' matched {len(substring)} elements. Be more specific or use @refs from a snapshot.",
+            suggestions=[f"Candidates: {candidates}"],
+            similar_elements=candidates,
+        )
+
+    # 3. Fuzzy match
+    all_names = [i.get("name", "") for i in interactive if i.get("name")]
+    similar = get_close_matches(description, all_names, n=5, cutoff=0.4)
+    if similar:
+        similar_elements = [
+            {"role": i.get("role"), "name": i.get("name")}
+            for i in interactive
+            if i.get("name") in similar
+        ][:5]
+        return ResolveError(
+            code="no_match",
+            message=f"No element matching '{description}'",
+            suggestions=[f"Did you mean: {', '.join(similar)}"],
+            similar_elements=similar_elements,
+        )
+
+    return ResolveError(
+        code="no_match",
+        message=f"No interactive element matching '{description}'",
+        suggestions=["Run 'webctl snapshot' to see available elements"],
+    )
+
+
+async def resolve_target(
+    page: Page,
+    session: Any | None,
+    target: str,
+    preferred_roles: frozenset[str] | None = None,
+) -> ResolveSuccess | ResolveError:
+    """Smart element resolution: @ref, query syntax, or text description."""
+    # 1. @ref
+    if target.startswith("@") and session:
+        ref_data = session.resolve_ref(target)
+        if ref_data:
+            role = ref_data.get("role", "")
+            name = ref_data.get("name", "")
+            if name:
+                escaped = name.replace('"', '\\"')
+                query_str = f'role={role} name~="{escaped}"'
+            else:
+                query_str = f"role={role}"
+            return await resolve_element_detailed(page, query_str)
+        return ResolveError(
+            code="ref_not_found",
+            message=f"Reference {target} not found. Run 'webctl snapshot' to get current refs.",
+            suggestions=["Take a new snapshot to get updated @refs"],
+        )
+
+    # 2. Query syntax (contains role=, name=, etc.)
+    if _is_query_syntax(target):
+        return await resolve_element_detailed(page, target)
+
+    # 3. Plain text description -> fuzzy match
+    return await resolve_by_description(page, target, preferred_roles)
+
+
+async def resolve_with_fallbacks(
+    page: Page,
+    session: Any | None,
+    target: str,
+    preferred_roles: frozenset[str] | None = None,
+    max_scrolls: int = 2,
+) -> ResolveSuccess | ResolveError:
+    """Resolve target with automatic fallbacks: overlay dismiss + scroll-to-find."""
+    from ..detectors.cookie_banner import dismiss_cookie_banner
+
+    result = await resolve_target(page, session, target, preferred_roles)
     if isinstance(result, ResolveSuccess):
-        return result.element
-    return None
+        return result
+
+    # Fallback 1: Dismiss overlays and retry
+    if result.code in ("no_match",):
+        try:
+            cookie_result = await dismiss_cookie_banner(page)
+            if cookie_result.dismissed:
+                result = await resolve_target(page, session, target, preferred_roles)
+                if isinstance(result, ResolveSuccess):
+                    return result
+        except Exception:
+            pass
+
+    # Fallback 2: Scroll down and retry (element may be below fold)
+    if isinstance(result, ResolveError) and result.code == "no_match":
+        for _ in range(max_scrolls):
+            await page.mouse.wheel(0, 600)
+            await asyncio.sleep(0.5)
+            result = await resolve_target(page, session, target, preferred_roles)
+            if isinstance(result, ResolveSuccess):
+                return result
+
+    return result
+
+
+def make_locator(page: Page, element: dict[str, Any]) -> Any:
+    """Build a Playwright locator from a resolved element."""
+    role = element.get("role")
+    name = element.get("name")
+    return (
+        page.get_by_role(cast(Any, role), name=name) if name else page.get_by_role(cast(Any, role))
+    )
+
+
+async def _click_with_overlay_retry(locator: Any, page: Page) -> None:
+    """Click with automatic overlay dismiss retry on interception."""
+    try:
+        await locator.first.click()
+    except Exception as e:
+        err = str(e).lower()
+        if "intercept" in err or "obscur" in err or "overlay" in err:
+            from ..detectors.cookie_banner import dismiss_cookie_banner
+
+            await dismiss_cookie_banner(page)
+            await asyncio.sleep(0.3)
+            await locator.first.click()
+        else:
+            raise
+
+
+async def _snapshot_after(
+    request: Request, session_manager: SessionManager, session_id: str
+) -> AsyncIterator[Response]:
+    """Take a landmark-aware snapshot and yield it as items. Used by --snapshot flag."""
+    from .navigation import _build_smart_navigate_snapshot, _grep_filter_responses
+
+    page = session_manager.get_active_page(session_id)
+    if not page:
+        return
+
+    session = session_manager.get_session(session_id)
+    responses, stats = await _build_smart_navigate_snapshot(
+        page,
+        session,
+        request,
+        max_name_length=80,
+        auto_limit=200,
+    )
+
+    # Apply grep filter if requested
+    grep_pattern = request.args.get("grep_pattern")
+    if grep_pattern:
+        responses = _grep_filter_responses(responses, grep_pattern)
+
+    for resp in responses:
+        yield resp
 
 
 @register("click")
 async def handle_click(
     request: Request, session_manager: SessionManager, **kwargs: Any
 ) -> AsyncIterator[Response]:
-    """Click an element."""
+    """Click an element. Target can be @ref, query, or text description."""
     session_id = request.args.get("session", "default")
     query = request.args.get("query")
     retry = request.args.get("retry", 0)
     retry_delay = request.args.get("retry_delay", 1000)
     wait_after = request.args.get("wait_after")
+    snapshot_after = request.args.get("snapshot_after", False)
 
     if not query:
         yield ErrorResponse(
@@ -246,8 +495,10 @@ async def handle_click(
         )
         return
 
+    session = session_manager.get_session(session_id)
+
     try:
-        result = await resolve_element_detailed(page, query)
+        result = await resolve_with_fallbacks(page, session, query, CLICKABLE_ROLES)
         if isinstance(result, ResolveError):
             yield ErrorResponse(
                 req_id=request.req_id,
@@ -261,20 +512,12 @@ async def handle_click(
             return
 
         element = result.element
-
-        # Get role and name to find element via Playwright
         role = element.get("role")
         name = element.get("name")
+        locator = make_locator(page, element)
 
-        locator = (
-            page.get_by_role(cast(Any, role), name=name)
-            if name
-            else page.get_by_role(cast(Any, role))
-        )
-
-        # Click with retry support
         async def do_click() -> None:
-            await locator.first.click()
+            await _click_with_overlay_retry(locator, page)
 
         await with_retry(do_click, retry, retry_delay)
 
@@ -282,7 +525,9 @@ async def handle_click(
         if wait_after:
             from .wait import perform_wait
 
-            await perform_wait(page, wait_after, timeout=30000)
+            pi = session_manager.get_active_page_info(session_id)
+            nid = pi.network_idle_detector if pi else None
+            await perform_wait(page, wait_after, timeout=30000, network_idle_detector=nid)
             summary["waited_for"] = wait_after
 
         yield DoneResponse(
@@ -290,6 +535,10 @@ async def handle_click(
             ok=True,
             summary=summary,
         )
+
+        if snapshot_after:
+            async for resp in _snapshot_after(request, session_manager, session_id):
+                yield resp
 
     except Exception as e:
         screenshot_path = await capture_error_screenshot(page, "click", "click_failed")
@@ -305,7 +554,7 @@ async def handle_click(
 async def handle_type(
     request: Request, session_manager: SessionManager, **kwargs: Any
 ) -> AsyncIterator[Response]:
-    """Type text into an element."""
+    """Type text into an element. Auto-detects combobox (select_option) and checkbox (check/uncheck)."""
     session_id = request.args.get("session", "default")
     query = request.args.get("query")
     text = request.args.get("text", "")
@@ -314,6 +563,7 @@ async def handle_type(
     retry = request.args.get("retry", 0)
     retry_delay = request.args.get("retry_delay", 1000)
     wait_after = request.args.get("wait_after")
+    snapshot_after = request.args.get("snapshot_after", False)
 
     if not query:
         yield ErrorResponse(
@@ -332,8 +582,10 @@ async def handle_type(
         )
         return
 
+    session = session_manager.get_session(session_id)
+
     try:
-        result = await resolve_element_detailed(page, query)
+        result = await resolve_with_fallbacks(page, session, query, TYPEABLE_ROLES)
         if isinstance(result, ResolveError):
             yield ErrorResponse(
                 req_id=request.req_id,
@@ -349,28 +601,52 @@ async def handle_type(
         element = result.element
         role = element.get("role")
         name = element.get("name")
+        locator = make_locator(page, element)
 
-        locator = (
-            page.get_by_role(cast(Any, role), name=name)
-            if name
-            else page.get_by_role(cast(Any, role))
-        )
+        # Smart type detection based on element role
+        action_taken = "fill"
 
-        # Type with retry support
         async def do_type() -> None:
-            if clear:
-                await locator.first.clear()
-            await locator.first.fill(text)
-            if submit:
-                await locator.first.press("Enter")
+            nonlocal action_taken
+            if role in ("combobox", "listbox"):
+                # Auto-detect: select option by label instead of typing
+                try:
+                    await locator.first.select_option(label=text)
+                    action_taken = "select_option"
+                except Exception:
+                    # Fallback: some comboboxes need click + type
+                    await locator.first.click()
+                    await page.keyboard.type(text)
+                    if submit:
+                        await page.keyboard.press("Enter")
+                    action_taken = "keyboard_type"
+            elif role in CHECKABLE_ROLES:
+                # Auto-detect: check/uncheck based on text
+                if text.lower() in ("true", "yes", "on", "1", "check"):
+                    await locator.first.check()
+                    action_taken = "check"
+                else:
+                    await locator.first.uncheck()
+                    action_taken = "uncheck"
+            else:
+                # Standard textbox fill
+                if clear:
+                    await locator.first.clear()
+                await locator.first.fill(text)
+                if submit:
+                    await page.keyboard.press("Enter")
 
         await with_retry(do_type, retry, retry_delay)
 
-        summary: dict[str, Any] = {"typed": {"role": role, "name": name, "text_length": len(text)}}
+        summary: dict[str, Any] = {
+            "typed": {"role": role, "name": name, "text_length": len(text), "action": action_taken}
+        }
         if wait_after:
             from .wait import perform_wait
 
-            await perform_wait(page, wait_after, timeout=30000)
+            pi = session_manager.get_active_page_info(session_id)
+            nid = pi.network_idle_detector if pi else None
+            await perform_wait(page, wait_after, timeout=30000, network_idle_detector=nid)
             summary["waited_for"] = wait_after
 
         yield DoneResponse(
@@ -378,6 +654,10 @@ async def handle_type(
             ok=True,
             summary=summary,
         )
+
+        if snapshot_after:
+            async for resp in _snapshot_after(request, session_manager, session_id):
+                yield resp
 
     except Exception as e:
         screenshot_path = await capture_error_screenshot(page, "type", "type_failed")
@@ -452,63 +732,6 @@ async def handle_set_value(
         )
 
 
-@register("scroll")
-async def handle_scroll(
-    request: Request, session_manager: SessionManager, **kwargs: Any
-) -> AsyncIterator[Response]:
-    """Scroll the page or an element."""
-    session_id = request.args.get("session", "default")
-    direction = request.args.get("direction", "down")
-    amount = request.args.get("amount", 300)
-    query = request.args.get("query")
-
-    page = session_manager.get_active_page(session_id)
-    if not page:
-        yield ErrorResponse(
-            req_id=request.req_id,
-            error="No active page",
-            code="no_active_page",
-        )
-        return
-
-    try:
-        if query:
-            # Scroll element into view
-            result = await resolve_element_detailed(page, query)
-            if isinstance(result, ResolveError):
-                yield ErrorResponse(
-                    req_id=request.req_id,
-                    error=result.message,
-                    code=result.code,
-                    details={
-                        "suggestions": result.suggestions,
-                        "similar_elements": result.similar_elements,
-                    },
-                )
-                return
-
-            element = result.element
-            role = element.get("role")
-            name = element.get("name")
-
-            locator = (
-                page.get_by_role(cast(Any, role), name=name)
-                if name
-                else page.get_by_role(cast(Any, role))
-            )
-
-            await locator.first.scroll_into_view_if_needed()
-        else:
-            # Scroll the page
-            delta_y = amount if direction == "down" else -amount
-            await page.mouse.wheel(0, delta_y)
-
-        yield DoneResponse(req_id=request.req_id, ok=True)
-
-    except Exception as e:
-        yield ErrorResponse(req_id=request.req_id, error=str(e))
-
-
 @register("press")
 async def handle_press(
     request: Request, session_manager: SessionManager, **kwargs: Any
@@ -516,6 +739,7 @@ async def handle_press(
     """Press a key."""
     session_id = request.args.get("session", "default")
     key = request.args.get("key")
+    snapshot_after = request.args.get("snapshot_after", False)
 
     if not key:
         yield ErrorResponse(
@@ -537,6 +761,10 @@ async def handle_press(
     try:
         await page.keyboard.press(key)
         yield DoneResponse(req_id=request.req_id, ok=True)
+
+        if snapshot_after:
+            async for resp in _snapshot_after(request, session_manager, session_id):
+                yield resp
 
     except Exception as e:
         yield ErrorResponse(req_id=request.req_id, error=str(e))
@@ -874,7 +1102,6 @@ async def handle_fill_form(
             elif isinstance(value, str):
                 filled = False
 
-                # Strategy 1: Try by role=textbox with name
                 try:
                     locator = page.get_by_role("textbox", name=field_name)
                     await locator.first.fill(value)
@@ -882,7 +1109,6 @@ async def handle_fill_form(
                 except Exception:
                     pass
 
-                # Strategy 2: Try by label
                 if not filled:
                     try:
                         locator = page.get_by_label(field_name)
@@ -891,7 +1117,6 @@ async def handle_fill_form(
                     except Exception:
                         pass
 
-                # Strategy 3: Try by placeholder
                 if not filled:
                     try:
                         locator = page.get_by_placeholder(field_name)
@@ -935,3 +1160,156 @@ async def handle_fill_form(
             "results": results,
         },
     )
+
+
+@register("do")
+async def handle_do(
+    request: Request, session_manager: SessionManager, **kwargs: Any
+) -> AsyncIterator[Response]:
+    """Execute multiple actions sequentially in one call.
+
+    Actions format: list of [action, target, value?] tuples.
+    Example: [["type", "Email", "user@test.com"], ["type", "Password", "secret"], ["click", "Log in"]]
+    """
+    session_id = request.args.get("session", "default")
+    actions = request.args.get("actions", [])
+    snapshot_after = request.args.get("snapshot_after", False)
+
+    if not actions:
+        yield ErrorResponse(
+            req_id=request.req_id,
+            error="No actions provided",
+            code="missing_argument",
+        )
+        return
+
+    page = session_manager.get_active_page(session_id)
+    if not page:
+        yield ErrorResponse(
+            req_id=request.req_id,
+            error="No active page",
+            code="no_active_page",
+        )
+        return
+
+    session = session_manager.get_session(session_id)
+    completed: list[dict[str, Any]] = []
+
+    for idx, action_spec in enumerate(actions):
+        if not isinstance(action_spec, list) or len(action_spec) < 2:
+            yield ErrorResponse(
+                req_id=request.req_id,
+                error=f"Action {idx}: invalid format, expected [action, target, ...value]",
+                code="invalid_action",
+                details={"completed": completed, "failed_at": idx},
+            )
+            return
+
+        action = action_spec[0]
+        target = action_spec[1]
+        value = action_spec[2] if len(action_spec) > 2 else None
+
+        try:
+            if action == "click":
+                result = await resolve_with_fallbacks(page, session, target, CLICKABLE_ROLES)
+                if isinstance(result, ResolveError):
+                    yield ErrorResponse(
+                        req_id=request.req_id,
+                        error=f"Action {idx} (click '{target}'): {result.message}",
+                        code=result.code,
+                        details={
+                            "suggestions": result.suggestions,
+                            "similar_elements": result.similar_elements,
+                            "completed": completed,
+                            "failed_at": idx,
+                        },
+                    )
+                    return
+                locator = make_locator(page, result.element)
+                await _click_with_overlay_retry(locator, page)
+                completed.append({"action": "click", "target": target, "ok": True})
+
+            elif action == "type":
+                if value is None:
+                    yield ErrorResponse(
+                        req_id=request.req_id,
+                        error=f"Action {idx} (type): missing value",
+                        code="missing_argument",
+                        details={"completed": completed, "failed_at": idx},
+                    )
+                    return
+                result = await resolve_with_fallbacks(page, session, target, TYPEABLE_ROLES)
+                if isinstance(result, ResolveError):
+                    yield ErrorResponse(
+                        req_id=request.req_id,
+                        error=f"Action {idx} (type '{target}'): {result.message}",
+                        code=result.code,
+                        details={
+                            "suggestions": result.suggestions,
+                            "similar_elements": result.similar_elements,
+                            "completed": completed,
+                            "failed_at": idx,
+                        },
+                    )
+                    return
+                element = result.element
+                role = element.get("role")
+                locator = make_locator(page, element)
+
+                if role in ("combobox", "listbox"):
+                    try:
+                        await locator.first.select_option(label=value)
+                    except Exception:
+                        await locator.first.click()
+                        await page.keyboard.type(value)
+                elif role in CHECKABLE_ROLES:
+                    if value.lower() in ("true", "yes", "on", "1", "check"):
+                        await locator.first.check()
+                    else:
+                        await locator.first.uncheck()
+                else:
+                    await locator.first.fill(value)
+                completed.append({"action": "type", "target": target, "ok": True})
+
+            elif action == "press":
+                await page.keyboard.press(target)
+                completed.append({"action": "press", "key": target, "ok": True})
+
+            elif action == "wait":
+                from .wait import perform_wait
+
+                pi = session_manager.get_active_page_info(session_id)
+                nid = pi.network_idle_detector if pi else None
+                await perform_wait(page, target, timeout=30000, network_idle_detector=nid)
+                completed.append({"action": "wait", "until": target, "ok": True})
+
+            else:
+                yield ErrorResponse(
+                    req_id=request.req_id,
+                    error=f"Action {idx}: unknown action '{action}'. Use: click, type, press, wait",
+                    code="invalid_action",
+                    details={"completed": completed, "failed_at": idx},
+                )
+                return
+
+            # Brief stability pause between actions
+            await asyncio.sleep(0.15)
+
+        except Exception as e:
+            yield ErrorResponse(
+                req_id=request.req_id,
+                error=f"Action {idx} ({action} '{target}'): {e}",
+                code=f"{action}_failed",
+                details={"completed": completed, "failed_at": idx},
+            )
+            return
+
+    yield DoneResponse(
+        req_id=request.req_id,
+        ok=True,
+        summary={"actions_completed": len(completed), "results": completed},
+    )
+
+    if snapshot_after:
+        async for resp in _snapshot_after(request, session_manager, session_id):
+            yield resp

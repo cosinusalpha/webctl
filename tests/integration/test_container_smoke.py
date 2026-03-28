@@ -119,7 +119,7 @@ def test_custom_browser_path_env_var(chromium_path: Path, isolated_config: Path)
         )
     finally:
         # Always stop the daemon
-        _run_webctl("stop", "--daemon", env_extra=env_extra)
+        _run_webctl("stop", env_extra=env_extra)
 
 
 def test_global_playwright_config(chromium_path: Path, isolated_config: Path) -> None:
@@ -152,4 +152,4 @@ def test_global_playwright_config(chromium_path: Path, isolated_config: Path) ->
         assert result.returncode == 0
     finally:
         # Always stop the daemon
-        _run_webctl("stop", "--daemon", env_extra=env_extra)
+        _run_webctl("stop", env_extra=env_extra)

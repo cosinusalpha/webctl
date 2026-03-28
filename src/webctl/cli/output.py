@@ -33,6 +33,7 @@ class OutputFormatter:
         quiet: bool = False,
         result_only: bool = False,
         force: bool = False,
+        log_file: Any = None,
     ):
         self.format = format
         # Respect NO_COLOR environment variable
@@ -41,11 +42,17 @@ class OutputFormatter:
         self.result_only = result_only  # Only output done/error
         self.force = force  # Show full output even if large
         self._console = Console(force_terminal=self.color, legacy_windows=False, no_color=_no_color)
+        self._log_file = log_file
         # A11y buffering for speedbump
         self._a11y_buffer: list[dict[str, Any]] = []
         self._a11y_count = 0
         self._a11y_stats: dict[str, Any] = {}
         self._summary_printed = False
+
+    def _log(self, text: str) -> None:
+        """Write a line to the log file if set."""
+        if self._log_file:
+            self._log_file.write(text + "\n")
 
     def output(self, data: dict[str, Any]) -> None:
         """Output data in the configured format."""
@@ -136,6 +143,7 @@ class OutputFormatter:
         # Build role breakdown (top 5 by count)
         sorted_roles = sorted(by_role.items(), key=lambda x: -x[1])[:5]
         role_str = ", ".join(f"{count} {role}" for role, count in sorted_roles)
+        self._log(f"# Snapshot: {total} elements ({role_str})")
 
         if self.color:
             self._console.print(f"[dim]# Snapshot: {total} elements ({role_str})[/dim]")
@@ -169,7 +177,8 @@ class OutputFormatter:
 
     def _output_a11y_compact(self, data: dict[str, Any]) -> None:
         """Output an a11y item in compact one-line format."""
-        node_id = data.get("id", "")
+        ref = data.get("ref", "")
+        node_id = f"@{ref}" if ref else data.get("id", "")
         role = data.get("role", "")
         name = data.get("name", "")
 
@@ -193,6 +202,8 @@ class OutputFormatter:
         query = data.get("query", "")
         query_str = f"  [{query}]" if query else ""
 
+        line = f"{node_id} {role}{name_str}{state_str}{query_str}"
+        self._log(line)
         if self.color:
             if query:
                 self._console.print(
@@ -201,11 +212,13 @@ class OutputFormatter:
             else:
                 self._console.print(f"[dim]{node_id}[/dim] {role}{name_str}{state_str}")
         else:
-            print(f"{node_id} {role}{name_str}{state_str}{query_str}")
+            print(line)
 
     def _output_jsonl(self, data: dict[str, Any]) -> None:
         """Output as single JSON line."""
-        print(json.dumps(data))
+        line = json.dumps(data)
+        self._log(line)
+        print(line)
 
     def _output_json(self, data: dict[str, Any]) -> None:
         """Output as formatted JSON."""
@@ -268,7 +281,8 @@ class OutputFormatter:
         """Output an a11y tree item."""
         role = data.get("role", "")
         name = data.get("name", "")
-        node_id = data.get("id", "")
+        ref = data.get("ref", "")
+        node_id = f"@{ref}" if ref else data.get("id", "")
 
         # Build state indicators
         states = []
@@ -284,19 +298,23 @@ class OutputFormatter:
             states.append("required")
 
         state_str = f" [{', '.join(states)}]" if states else ""
+        line = f"{node_id} {role} {name}{state_str}"
+        self._log(line)
 
         if self.color:
             self._console.print(
                 f"[dim]{node_id}[/dim] [cyan]{role}[/cyan] [white]{name}[/white]{state_str}"
             )
         else:
-            print(f"{node_id} {role} {name}{state_str}")
+            print(line)
 
     def _output_markdown(self, data: dict[str, Any]) -> None:
         """Output markdown content."""
-        content = data.get("content", "")
+        content = data.get("content", "") or data.get("text", "")
         title = data.get("title", "")
         url = data.get("url", "")
+        if content:
+            self._log(content)
 
         if self.color:
             self._console.print(Panel(content, title=f"{title} ({url})", border_style="blue"))
@@ -408,17 +426,20 @@ class OutputFormatter:
         """Output an event."""
         event = data.get("event", "")
         payload = data.get("payload", {})
+        line = f"EVENT {event}: {json.dumps(payload)}"
+        self._log(line)
 
         if self.color:
             self._console.print(f"[yellow]EVENT[/yellow] {event}: {json.dumps(payload)}")
         else:
-            print(f"EVENT {event}: {json.dumps(payload)}")
+            print(line)
 
     def _output_error(self, data: dict[str, Any]) -> None:
         """Output an error."""
         error = data.get("error", "Unknown error")
         code = data.get("code", "")
         details = data.get("details", {})
+        self._log(f"ERROR [{code}] {error}")
 
         if self.color:
             error_console.print(f"[red]ERROR[/red] [{code}] {error}")
@@ -451,11 +472,13 @@ class OutputFormatter:
                 if "total" in summary and "by_role" in summary:
                     self._output_a11y_stats(summary)
                 else:
+                    self._log(f"OK {json.dumps(summary)}")
                     if self.color:
                         self._console.print(f"[green]OK[/green] {json.dumps(summary)}")
                     else:
                         print(f"OK {json.dumps(summary)}")
         else:
+            self._log("FAILED")
             if self.color:
                 error_console.print("[red]FAILED[/red]")
             else:
@@ -475,10 +498,12 @@ class OutputFormatter:
 
         role_str = ", ".join(role_parts)
 
+        line = f"{total} elements ({role_str})"
+        self._log(line)
         if self.color:
             self._console.print(f"[green]{total}[/green] elements ({role_str})")
         else:
-            print(f"{total} elements ({role_str})")
+            print(line)
 
 
 def print_error(message: str) -> None:

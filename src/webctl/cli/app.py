@@ -22,7 +22,7 @@ if sys.platform == "win32":
     if hasattr(sys.stderr, "buffer") and not isinstance(sys.stderr, io.TextIOWrapper):
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-from ..config import WebctlConfig, get_daemon_cmd, resolve_browser_settings
+from ..config import WebctlConfig, get_daemon_cmd, get_data_dir, resolve_browser_settings
 from ..protocol.client import DaemonClient
 from ..protocol.transport import SocketError
 from .output import OutputFormatter, print_error, print_info, print_success
@@ -70,20 +70,26 @@ async def ensure_daemon(session_id: str) -> bool:
     print_info(f"Starting daemon for session '{session_id}'...")
     cmd = get_daemon_cmd(session_id)
 
+    # Capture stderr to a log file for diagnostics on failure
+    log_dir = get_data_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "daemon-startup.log"
+    log_file = open(log_path, "w")  # noqa: SIM115
+
     # Start in background
     if sys.platform == "win32":
         subprocess.Popen(
             cmd,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=log_file,
         )
     else:
         subprocess.Popen(
             cmd,
             start_new_session=True,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=log_file,
         )
 
     # Wait for daemon to start
@@ -98,14 +104,40 @@ async def ensure_daemon(session_id: str) -> bool:
             pass
 
     print_error("Failed to start daemon")
+
+    # Show diagnostic info from the log
+    try:
+        log_file.close()
+        log_content = log_path.read_text().strip()
+        if log_content:
+            console.print(f"[dim]Daemon log ({log_path}):[/dim]")
+            # Show last 500 chars to avoid flooding the terminal
+            console.print(f"[dim]{log_content[-500:]}[/dim]")
+    except Exception:
+        pass
+
+    console.print()
+    console.print("[dim]Troubleshooting tips:[/dim]")
+    console.print("[dim]  - Run 'webctl setup' to ensure the browser is installed[/dim]")
+    console.print("[dim]  - Run 'webctl doctor' to check your environment[/dim]")
+    console.print("[dim]  - In headless environments, use: webctl start --mode unattended[/dim]")
     return False
 
 
 async def run_command(command: str, args: dict[str, Any]) -> None:
     """Run a command against the daemon."""
+    log_path = os.environ.get("WEBCTL_LOG")
+    log_file = open(log_path, "a") if log_path else None  # noqa: SIM115
     formatter = OutputFormatter(
-        format=_format, quiet=_quiet, result_only=_result_only, force=_force
+        format=_format,
+        quiet=_quiet,
+        result_only=_result_only,
+        force=_force,
+        log_file=log_file,
     )
+
+    if log_file:
+        log_file.write(f"$ {' '.join(sys.argv)}\n")
 
     if not await ensure_daemon(_session):
         raise typer.Exit(1)
@@ -128,6 +160,9 @@ async def run_command(command: str, args: dict[str, Any]) -> None:
         print_error(f"Connection failed: {e}")
         raise typer.Exit(1) from None
     finally:
+        if log_file:
+            log_file.write("\n")
+            log_file.close()
         await client.close()
 
 
@@ -378,10 +413,9 @@ def cmd_setup(
         print_success("webctl is ready to use!")
         console.print()
         console.print("Try it out:")
-        console.print("  webctl start")
         console.print('  webctl navigate "https://example.com"')
-        console.print("  webctl snapshot --interactive-only")
-        console.print("  webctl stop --daemon")
+        console.print("  webctl click @e1")
+        console.print("  webctl stop")
     else:
         print_error("Failed to install browser")
         console.print()
@@ -457,624 +491,59 @@ def cmd_doctor() -> None:
 # These are always in context, so they must be ~25 lines
 AGENT_PROMPT = """# webctl - Browser Control
 
-Start: `webctl start` | End: `webctl stop --daemon`
+Navigate: `webctl navigate "url"` (auto-starts session) | End: `webctl stop`
 
 ## Quick Reference
-- `webctl snapshot --count` - Just element counts (zero context)
-- `webctl snapshot --interactive-only` - See clickable elements
-- `webctl snapshot --show-query` - Show query for each element
-- `webctl click 'role=button name~="Text"'` - Click
-- `webctl click '...' --retry 3 --wait network-idle` - Reliable click
-- `webctl type 'role=textbox name~="Field"' "value" --submit` - Type + Enter
-- `webctl fill-form '{"Email": "x@y.com", "Password": "***"}'` - Bulk fill
-- `webctl status --brief` - Quick page state check
+- `webctl navigate "url"` - Go to URL (returns snapshot with @refs)
+- `webctl navigate "url" --read` - Get readable text content
+- `webctl navigate "url" --search "query"` - Search on page
+- `webctl snapshot` - Re-scan page (returns @refs)
+- `webctl snapshot --interactive-only` - Just buttons/links/inputs
+- `webctl click @e3` or `webctl click "Submit"` - Click by @ref or text
+- `webctl click "Submit" --snapshot` - Click + return new page state
+- `webctl type @e2 "text"` or `webctl type "Email" "text"` - Type by @ref or text
+- `webctl type "Country" "Germany"` - Auto-selects from dropdown
+- `webctl do '[["type","Email","x@y.com"],["type","Password","***"],["click","Log in"]]' --snapshot`
+- `webctl press Enter` | `webctl wait network-idle`
 
-## Query Syntax
-Quote: `'role=button name~="Text"'` (single outside, double for name)
-- `name~="text"` - Contains (PREFERRED)
-- `name="text"` - Exact match (brittle)
-
-## Reduce Output
-- `--count` - Just counts (zero context cost)
-- `--interactive-only` - Only buttons/links/inputs
-- `--grep "pattern"` - Filter by regex
-- `--within "role=main"` - Scope to area
+## Target Syntax (for click/type)
+- `@e3` - Element ref from snapshot (fastest)
+- `"Submit"` - Find by text description (auto-matched)
+- `'role=button name~="Text"'` - Full query syntax (fallback)
 
 Run `webctl --help` for more.
 """
 
 # Full skill content for skill-based agents (Claude, Goose)
 # These are loaded on-demand when agent needs browser automation
-SKILL_CONTENT = """---
-name: webctl
-description: Browser automation via CLI. Use when browsing websites, filling forms, extracting data from web pages, taking screenshots, or automating web interactions. Preferred over MCP browser tools for better context control.
-allowed-tools: Bash, Read
----
 
-# webctl - Browser Automation CLI
 
-CLI tool for browser automation. Use this instead of MCP browser tools - it gives you control over what enters your context.
+def _load_skill_content() -> str:
+    """Load SKILL.md content from package data or repo root."""
+    # Try importlib.resources first (installed package)
+    try:
+        from importlib.resources import files
 
-## RULES (Read First!)
+        skill_text = (files("webctl") / "skills" / "webctl" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        if skill_text:
+            return skill_text
+    except Exception:
+        pass
 
-1. **ALWAYS start a session:** `webctl start`
-2. **ALWAYS end your session:** `webctl stop --daemon`
-3. **ALWAYS snapshot before interacting** to see what elements exist
-4. **ALWAYS use `--interactive-only`** with snapshot (unless you need to read page text)
-5. **ALWAYS use `name~="text"`** not `name="text"` (see "Why name~=" below)
-6. **ALWAYS quote queries:** `'role=button name~="Submit"'`
-7. **Output is compact by default** - use `--force` if truncated (>200 elements)
+    # Try repo root (development mode)
+    repo_root = Path(__file__).resolve().parents[3]
+    skill_file = repo_root / "skills" / "webctl" / "SKILL.md"
+    if skill_file.exists():
+        return skill_file.read_text(encoding="utf-8")
 
-## Quick Start Template
+    raise FileNotFoundError(
+        "Could not find skills/webctl/SKILL.md. Reinstall webctl or run from the repo root."
+    )
 
-```bash
-# 1. Start browser
-webctl start                              # Visible browser
-# OR: webctl start --mode unattended      # Headless (no window)
 
-# 2. Go to page
-webctl navigate "https://example.com"
-
-# 3. See what's on the page (DO THIS BEFORE CLICKING ANYTHING)
-webctl snapshot --interactive-only
-
-# 4. Interact with elements
-webctl click 'role=button name~="Submit"'
-
-# 5. End session
-webctl stop --daemon
-```
-
----
-
-## How Queries Work
-
-Queries find elements on the page using two parts:
-
-```
-role=ROLE name~="TEXT"
-```
-
-- **`role=X`** - Matches elements with ARIA role X (button, link, textbox, etc.)
-- **`name~="Y"`** - Matches elements whose visible label CONTAINS Y
-- **Both must match** - The element must have the right role AND contain the text
-
-**Quoting rules:**
-- Wrap the ENTIRE query in single quotes: `'...'`
-- Wrap the name value in double quotes: `name~="..."`
-- Full example: `'role=button name~="Submit"'`
-
-### Why `name~=` Instead of `name=`
-
-| Syntax | Behavior | Example |
-|--------|----------|---------|
-| `name~="Submit"` | Contains "Submit" | Matches "Submit", "Submit Form", "Submit Now" |
-| `name="Submit"` | Exactly "Submit" | ONLY matches "Submit", fails on "Submit Form" |
-
-**Use `name~=` because:**
-- Web pages change slightly over time
-- Button text might be "Submit" today, "Submit Form" tomorrow
-- `name=` will silently fail to find the element if text changes
-- `name~=` is more robust and forgiving
-
-### Common Roles Reference
-
-| Role | What It Matches | Example Query |
-|------|-----------------|---------------|
-| `button` | Buttons, submit buttons | `'role=button name~="Submit"'` |
-| `link` | Links, anchor tags | `'role=link name~="Sign in"'` |
-| `textbox` | Text inputs, text areas | `'role=textbox name~="Email"'` |
-| `combobox` | Dropdowns, select menus | `'role=combobox name~="Country"'` |
-| `checkbox` | Checkboxes | `'role=checkbox name~="Remember"'` |
-| `radio` | Radio buttons | `'role=radio name~="Option A"'` |
-| `form` | Forms (for scoping) | `--within "role=form"` |
-| `main` | Main content area | `--within "role=main"` |
-| `table` | Tables | `--within "role=table"` |
-| `navigation` | Nav menus | `--within "role=navigation"` |
-
----
-
-## Session Lifecycle
-
-### Starting a Session
-
-```bash
-webctl start                      # Visible browser (see what's happening)
-webctl start --mode unattended    # Headless (no window, faster)
-webctl -s myprofile start         # Named session (separate cookies/login state)
-```
-
-**What happens:**
-- Browser launches (or connects to existing daemon)
-- Session is ready for commands
-- Default timeout for commands: 30 seconds
-
-### Ending a Session
-
-```bash
-webctl stop --daemon              # Closes browser AND daemon
-webctl stop                       # Just closes browser, daemon stays running
-```
-
-**IMPORTANT: Always end with `webctl stop --daemon`**
-
-### What If I Forget to Stop?
-
-- Browser stays open consuming memory
-- Session remains active
-- You can still run `webctl stop --daemon` later to clean up
-- Starting a new `webctl start` will reuse the existing session
-
-### What If I Start Twice?
-
-- It reuses the existing session (safe to do)
-- No error, no duplicate browsers
-
-### What If a Command Fails Mid-Session?
-
-- Session stays active
-- Browser stays on current page
-- You can retry the command or continue with other commands
-- Use `webctl status` to check session state
-
----
-
-## Snapshot Commands
-
-### Use `--interactive-only` (Default Choice)
-
-```bash
-webctl snapshot --interactive-only
-```
-
-Shows only elements you can interact with: buttons, links, inputs, checkboxes, etc.
-
-**Use this when:** You want to click, type, or interact with the page.
-
-### Use Full Snapshot (Without `--interactive-only`)
-
-```bash
-webctl snapshot
-```
-
-Shows ALL elements including text, headings, paragraphs.
-
-**Use this when:** You need to read text content on the page.
-
-### Use `--within` to Scope (Reduce Noise)
-
-```bash
-webctl snapshot --interactive-only --within "role=main"
-webctl snapshot --interactive-only --within "role=form"
-```
-
-**What `--within` does:**
-- Filters output to only show elements INSIDE the specified container
-- Reduces noise from navigation, footers, sidebars
-- Use it when page has too many elements
-
-**Common scopes:**
-- `--within "role=main"` - Main content, skip nav/footer
-- `--within "role=form"` - Just the form
-- `--within "role=table"` - Just a table
-- `--within "role=dialog"` - Just a modal/popup
-
-### Limit Output Size
-
-```bash
-webctl snapshot --interactive-only --limit 30
-```
-
-Caps output at 30 elements. Use when pages have many elements.
-
----
-
-## Large Output Handling
-
-webctl uses **compact output by default**. On large pages (>200 elements), it shows:
-- Summary header: `# Snapshot: 523 elements (89 button, 156 link, ...)`
-- Preview of first 20 elements
-- Hint: "Use --force for full output"
-
-### Commands for Large Pages
-
-```bash
-webctl snapshot                              # Compact output (fast)
-webctl snapshot --force                      # Full output even if large
-webctl snapshot --grep "button|submit"       # Filter by regex pattern
-webctl snapshot --names-only                 # Minimal output (role + name only)
-webctl snapshot --max-name-length 50         # Truncate long names
-```
-
-### When to Use Each Option
-
-| Scenario | Command |
-|----------|---------|
-| Need all elements | `--force` |
-| Looking for specific text | `--grep "pattern"` |
-| Too much output | `--interactive-only` or `--within "role=main"` |
-
----
-
-## AI-Friendly Features
-
-### Quick Page Assessment (Zero Context)
-
-```bash
-webctl snapshot --count                    # Just counts, no elements
-webctl status --brief                      # One-line: URL | elements | errors | state
-```
-
-### Copy-Paste Ready Queries
-
-```bash
-webctl snapshot --show-query --interactive-only
-# n1 button "Submit"  [role=button name~="Submit"]
-# Copy the query in brackets to use with click/type
-```
-
-### Reliable Actions
-
-```bash
-webctl click '...' --retry 3               # Retry up to 3 times
-webctl click '...' --wait network-idle     # Wait after click
-webctl type '...' "text" --submit --wait network-idle
-```
-
-### Bulk Form Fill
-
-```bash
-webctl fill-form '{"Email": "user@example.com", "Password": "secret"}'
-webctl fill-form '{"Remember me": true}'   # Checkboxes use boolean
-```
-
----
-
-## Interaction Commands
-
-### Click
-
-```bash
-webctl click 'role=button name~="Submit"'
-webctl click 'role=link name~="Sign in"'
-webctl click 'role=button name~="Next"'
-```
-
-### Type Text
-
-```bash
-# Type into a field
-webctl type 'role=textbox name~="Email"' "user@example.com"
-
-# Type and press Enter (for search, login forms)
-webctl type 'role=textbox name~="Search"' "my query" --submit
-```
-
-### Select from Dropdown
-
-```bash
-# By visible text (PREFERRED)
-webctl select 'role=combobox name~="Country"' --label "Germany"
-
-# By value attribute
-webctl select 'role=combobox name~="Country"' --value "DE"
-```
-
-### Checkboxes
-
-```bash
-webctl check 'role=checkbox name~="Remember"'
-webctl uncheck 'role=checkbox name~="Newsletter"'
-```
-
-### Keyboard
-
-```bash
-webctl press Enter
-webctl press Tab
-webctl press Escape
-```
-
-### Scroll
-
-```bash
-webctl scroll down
-webctl scroll up
-webctl scroll --to "role=list" down   # Scroll element into view
-```
-
-### File Upload
-
-```bash
-webctl upload 'role=button name~="Upload"' --file /path/to/file.pdf
-```
-
----
-
-## Wait Commands
-
-**Default timeout: 30 seconds / 30000ms** (override with `--timeout`, value in milliseconds)
-
-### Wait for Page Load
-
-```bash
-webctl wait network-idle              # Wait for all network requests to finish
-```
-
-**Use after:** `navigate`, clicking links that load new pages
-
-### Wait for Element to Appear
-
-```bash
-webctl wait 'exists:role=button name~="Continue"'
-```
-
-**What happens:** Retries query every ~100ms until element appears or timeout.
-
-**Use when:** Element loads dynamically after page load.
-
-### Wait for Element to Disappear
-
-```bash
-webctl wait 'hidden:role=dialog'
-webctl wait 'hidden:role=progressbar'
-```
-
-**Use when:** Waiting for loading spinners or modals to close.
-
-### Wait for URL Change
-
-```bash
-webctl wait 'url-contains:"/dashboard"'
-```
-
-**Use after:** Form submission, login, actions that redirect.
-
-### Custom Timeout
-
-```bash
-webctl wait --timeout 60000 network-idle    # 60 seconds
-webctl wait --timeout 5000 'exists:role=button name~="Load"'  # 5 seconds
-```
-
----
-
-## Navigation Commands
-
-```bash
-webctl navigate "https://example.com"
-webctl back
-webctl forward
-webctl reload
-```
-
-**Note:** `navigate` waits for initial page load but NOT for all dynamic content. Add `webctl wait network-idle` if page loads data dynamically.
-
----
-
-## When Queries Fail - Troubleshooting
-
-### Step 1: Check What's Actually on the Page
-
-```bash
-webctl snapshot --interactive-only
-```
-
-Look at the output. Is your element there with a different name?
-
-### Step 2: Test Your Query
-
-```bash
-webctl query 'role=button name~="Submit"'
-```
-
-**What this shows:**
-- Matching elements (if any)
-- Suggestions for similar elements if no exact match
-- Helps you see what your query matches vs what's available
-
-### Step 3: Common Fixes
-
-| Problem | Solution |
-|---------|----------|
-| "Element not found" | Check snapshot, adjust query text |
-| Element exists but wrong name | Use `name~=` with different text |
-| Too many matches | Add more specific text to name |
-| Element in popup/modal | Check if modal is open, might need `--within "role=dialog"` |
-| Element appeared after page load | Add `webctl wait 'exists:...'` before interacting |
-
-### Step 4: If Still Stuck
-
-```bash
-# See ALL elements (not just interactive)
-webctl snapshot
-
-# Check for JavaScript errors
-webctl console --level error
-
-# Take screenshot to see visual state
-webctl screenshot --path debug.png
-```
-
-### Step 5: Click Worked but Nothing Happened
-
-Sometimes the click succeeds but the page doesn't respond as expected:
-
-```bash
-# Wait for page to respond after clicking
-webctl click 'role=button name~="Submit"'
-webctl wait network-idle                    # Wait for any network activity
-webctl screenshot --path after-click.png    # See what happened visually
-
-# Or wait for expected result
-webctl click 'role=button name~="Submit"'
-webctl wait 'url-contains:"/success"'       # Wait for redirect
-```
-
-**Common causes:**
-- Page needs time to process (add `wait network-idle`)
-- Button triggers JavaScript, not navigation (check for new elements)
-- Form validation failed (check for error messages in snapshot)
-
----
-
-## Error Messages and What They Mean
-
-| Error | Meaning | Fix |
-|-------|---------|-----|
-| "Element not found" | Query matched nothing | Check snapshot, adjust query |
-| "Element not visible" | Element exists but hidden | Wait for animation/modal, or scroll |
-| "Element disabled" | Button/input is disabled | Wait for page to enable it, or check if action is allowed |
-| "Timeout" | Action took too long | Increase `--timeout` or add explicit `wait` |
-| "Session not found" | No active session | Run `webctl start` first |
-| "Navigation failed" | URL couldn't load | Check URL, network, or site might be down |
-
----
-
-## Output Control
-
-```bash
-webctl --quiet navigate "URL"          # Suppress status messages
-webctl --result-only snapshot          # Just the data, no metadata
-webctl --format jsonl snapshot         # JSON lines (for piping to jq)
-```
-
-**When to use:**
-- `--quiet` - When you don't need status updates
-- `--result-only` - When parsing output programmatically
-- `--format jsonl` - When piping to `jq` or other JSON tools
-
----
-
-## Multi-Tab Support
-
-```bash
-webctl pages              # List all open tabs
-webctl focus 1            # Switch to tab 1
-webctl close-page 2       # Close tab 2
-```
-
-**When to use:** When a click opens a new tab, or site has multiple windows.
-
----
-
-## Human-In-The-Loop (HITL)
-
-**Use when automation can't proceed alone:** CAPTCHA, MFA, complex auth.
-
-**Requires visible browser:** Use `webctl start` (NOT `--mode unattended`)
-
-### Pause for Secret Entry (MFA codes, passwords)
-
-```bash
-webctl prompt-secret --prompt "Enter MFA code:"
-```
-
-Pauses until human enters a value.
-
-### Pause for Human Action (CAPTCHA, manual steps)
-
-Use shell read command to pause:
-
-```bash
-read -p "Please solve the CAPTCHA, then press Enter"
-```
-
-Pauses until human presses Enter in terminal.
-
-### Example: Login with MFA
-
-```bash
-webctl start                    # Must be visible
-webctl navigate "https://example.com/login"
-webctl type 'role=textbox name~="Email"' "user@example.com"
-webctl type 'role=textbox name~="Password"' "password" --submit
-webctl prompt-secret --prompt "Enter MFA code from authenticator:"
-webctl wait 'url-contains:"/dashboard"'
-webctl stop --daemon
-```
-
----
-
-## Common Patterns
-
-### Login Flow
-
-```bash
-webctl start
-webctl navigate "https://example.com/login"
-webctl snapshot --interactive-only --within "role=form"
-webctl type 'role=textbox name~="Email"' "user@example.com"
-webctl type 'role=textbox name~="Password"' "password" --submit
-webctl wait 'url-contains:"/dashboard"'
-webctl snapshot --interactive-only
-webctl stop --daemon
-```
-
-### Form Submission
-
-```bash
-webctl start
-webctl navigate "https://example.com/form"
-webctl snapshot --interactive-only --within "role=form"
-webctl type 'role=textbox name~="Name"' "John Doe"
-webctl type 'role=textbox name~="Email"' "john@example.com"
-webctl select 'role=combobox name~="Country"' --label "Germany"
-webctl check 'role=checkbox name~="Terms"'
-webctl click 'role=button name~="Submit"'
-webctl wait network-idle
-webctl stop --daemon
-```
-
-### Search and Read Results
-
-```bash
-webctl start
-webctl navigate "https://example.com"
-webctl type 'role=textbox name~="Search"' "my search query" --submit
-webctl wait network-idle
-webctl snapshot --within "role=main"    # Full snapshot to read text
-webctl stop --daemon
-```
-
----
-
-## Quick Reference
-
-| Task | Command |
-|------|---------|
-| Start browser | `webctl start` |
-| Start headless | `webctl start --mode unattended` |
-| Go to URL | `webctl navigate "URL"` |
-| Count elements | `webctl snapshot --count` |
-| See elements | `webctl snapshot --interactive-only` |
-| Show queries | `webctl snapshot --show-query --interactive-only` |
-| Quick status | `webctl status --brief` |
-| Click button | `webctl click 'role=button name~="Text"'` |
-| Click + retry | `webctl click '...' --retry 3` |
-| Click + wait | `webctl click '...' --wait network-idle` |
-| Type in field | `webctl type 'role=textbox name~="Field"' "value"` |
-| Type + Enter | `webctl type '...' "value" --submit` |
-| Fill form | `webctl fill-form '{"Email": "x", "Password": "y"}'` |
-| Select dropdown | `webctl select 'role=combobox name~="Field"' --label "Option"` |
-| Wait for load | `webctl wait network-idle` |
-| Wait for element | `webctl wait 'exists:role=button name~="Text"'` |
-| Debug query | `webctl query 'role=button name~="Text"'` |
-| End session | `webctl stop --daemon` |
-
----
-
-## Remember
-
-1. **Start:** `webctl start`
-2. **Snapshot first:** `webctl snapshot --interactive-only`
-3. **Quote queries:** `'role=button name~="Text"'`
-4. **Use `name~=`** not `name=`
-5. **Debug with:** `webctl query` and `webctl snapshot`
-6. **End:** `webctl stop --daemon`
-
-Run `webctl --help` or `webctl <command> --help` for more options.
-"""
+SKILL_CONTENT = _load_skill_content()
 
 
 @app.command("agent-prompt")
@@ -1104,7 +573,7 @@ def cmd_agent_prompt(
                 "webctl start",
                 'webctl navigate "https://example.com"',
                 "webctl snapshot --interactive-only",
-                "webctl stop --daemon",
+                "webctl stop",
             ],
             "common_commands": {
                 "start": "webctl start",
@@ -1112,7 +581,7 @@ def cmd_agent_prompt(
                 "snapshot": "webctl snapshot --interactive-only",
                 "click": "webctl click 'role=button name~=\"Text\"'",
                 "type": 'webctl type \'role=textbox name~="Field"\' "value"',
-                "stop": "webctl stop --daemon",
+                "stop": "webctl stop",
             },
         }
         print(json_module.dumps(data, indent=2))
@@ -1378,12 +847,17 @@ def cmd_init(
 
 @app.command("start")
 def cmd_start(
-    mode: str = typer.Option("attended", "--mode", "-m", help="Mode: attended or unattended"),
+    mode: str | None = typer.Option(
+        None, "--mode", "-m", help="Mode: attended or unattended (default: from config)"
+    ),
     auto_setup: bool = typer.Option(
         True, "--auto-setup/--no-auto-setup", help="Auto-install browser if missing"
     ),
 ) -> None:
     """Start a browser session."""
+    cfg = WebctlConfig.load()
+    mode = mode or cfg.default_mode
+
     custom_path, allow_global = resolve_browser_settings()
 
     # Check if browser is installed
@@ -1415,11 +889,13 @@ def cmd_start(
 
 @app.command("stop")
 def cmd_stop(
-    daemon: bool = typer.Option(False, "--daemon", "-d", help="Also shutdown the daemon process"),
+    keep_daemon: bool = typer.Option(
+        False, "--keep-daemon", help="Keep daemon running (only close browser)"
+    ),
 ) -> None:
-    """Stop the browser session (and optionally the daemon)."""
+    """Stop the browser session and daemon (default: closes everything)."""
     asyncio.run(run_command("session.stop", {"session": _session}))
-    if daemon:
+    if not keep_daemon:
         asyncio.run(run_command("daemon.shutdown", {}))
 
 
@@ -1479,12 +955,44 @@ def cmd_close_page(
 def cmd_navigate(
     url: str = typer.Argument(..., help="URL to navigate to"),
     wait_until: str = typer.Option(
-        "load", "--wait", "-w", help="Wait condition: load, domcontentloaded, networkidle"
+        "domcontentloaded",
+        "--wait",
+        "-w",
+        help="Wait condition: domcontentloaded, load, networkidle",
+    ),
+    read: bool = typer.Option(False, "--read", help="Return readable text content (markdown)"),
+    search: str | None = typer.Option(
+        None, "--search", help="Find search box, type query, submit, return results"
+    ),
+    snapshot: bool = typer.Option(
+        False, "--snapshot", "-s", help="Return full a11y snapshot with @refs"
+    ),
+    grep: str | None = typer.Option(
+        None, "--grep", "-g", help="Return a11y elements matching regex (implies --snapshot)"
     ),
 ) -> None:
-    """Navigate to a URL."""
+    """Navigate to a URL. Auto-starts session. Returns structured data + page summary.
+
+    Examples:
+        webctl navigate "https://example.com"                    # structured data + summary
+        webctl navigate "https://example.com" --grep "€|price"   # filtered snapshot
+        webctl navigate "https://example.com" --snapshot          # full a11y snapshot
+        webctl navigate "https://example.com" --read              # readable markdown
+        webctl navigate "https://duckduckgo.com" --search "query" # search + snapshot
+    """
     asyncio.run(
-        run_command("navigate", {"url": url, "wait_until": wait_until, "session": _session})
+        run_command(
+            "navigate",
+            {
+                "url": url,
+                "wait_until": wait_until,
+                "read": read,
+                "search": search,
+                "snapshot": snapshot,
+                "grep_pattern": grep,
+                "session": _session,
+            },
+        )
     )
 
 
@@ -1549,19 +1057,20 @@ def cmd_snapshot(
     count_only: bool = typer.Option(
         False, "--count", "-c", help="Only output element counts, no elements (zero context cost)"
     ),
+    read: bool = typer.Option(
+        False, "--read", help="Return readable text content (markdown) instead of a11y tree"
+    ),
 ) -> None:
-    """Take a snapshot of the current page.
+    """Take a snapshot of the current page. Returns @refs by default.
 
-    Output is compact by default with a summary header. On large pages (>200 elements),
-    it shows a preview. Use --force to see all elements.
+    Default shows all elements with @refs. Use --interactive-only for just interactive.
 
     Examples:
-        webctl snapshot                          # Compact output
+        webctl snapshot                          # All elements with @refs
+        webctl snapshot --interactive-only       # Only buttons/links/inputs with @refs
+        webctl snapshot --read                   # Readable text content
         webctl snapshot --count                  # Just counts (zero context)
-        webctl snapshot --show-query             # Include query for each element
-        webctl snapshot --interactive-only       # Only buttons/links/inputs
         webctl snapshot --grep "button|submit"   # Filter by pattern
-        webctl snapshot --force                  # Full output even if large
     """
     asyncio.run(
         run_command(
@@ -1581,6 +1090,8 @@ def cmd_snapshot(
                 "visible_only": visible_only,
                 "show_query": show_query,
                 "count_only": count_only,
+                "compact_refs": True,
+                "read": read,
                 "session": _session,
             },
         )
@@ -1625,7 +1136,7 @@ def cmd_query(
 
 @app.command("click")
 def cmd_click(
-    query: str = typer.Argument(..., help="Query to find element"),
+    query: str = typer.Argument(..., help="Element: @ref, 'role=X name~=Y', or text description"),
     retry: int = typer.Option(0, "--retry", "-R", help="Number of retries on failure"),
     retry_delay: int = typer.Option(1000, "--retry-delay", help="Delay between retries in ms"),
     wait_after: str | None = typer.Option(
@@ -1634,13 +1145,20 @@ def cmd_click(
         "-w",
         help="Wait condition after click (e.g., 'network-idle', 'exists:role=dialog')",
     ),
+    snapshot: bool = typer.Option(
+        False, "--snapshot", "-S", help="Return page snapshot after action"
+    ),
+    grep: str | None = typer.Option(
+        None, "--grep", "-g", help="Filter snapshot by regex (implies --snapshot)"
+    ),
 ) -> None:
-    """Click an element.
+    """Click an element. Accepts @ref, query, or text description.
 
     Examples:
-        webctl click 'role=button name~="Submit"'
-        webctl click 'role=button name~="Submit"' --retry 3
-        webctl click 'role=button name~="Submit"' --wait network-idle
+        webctl click @e3
+        webctl click "Submit"
+        webctl click 'role=button name~="Submit"' --snapshot
+        webctl click "Submit" --snapshot --grep "result|price"
     """
     asyncio.run(
         run_command(
@@ -1650,6 +1168,8 @@ def cmd_click(
                 "retry": retry,
                 "retry_delay": retry_delay,
                 "wait_after": wait_after,
+                "snapshot_after": snapshot or bool(grep),
+                "grep_pattern": grep,
                 "session": _session,
             },
         )
@@ -1658,8 +1178,8 @@ def cmd_click(
 
 @app.command("type")
 def cmd_type(
-    query: str = typer.Argument(..., help="Query to find element"),
-    text: str = typer.Argument(..., help="Text to type"),
+    query: str = typer.Argument(..., help="Element: @ref, 'role=X name~=Y', or text description"),
+    text: str = typer.Argument(..., help="Text to type (or option label for dropdowns)"),
     clear: bool = typer.Option(False, "--clear", "-c", help="Clear field first"),
     submit: bool = typer.Option(False, "--submit", help="Press Enter after typing"),
     retry: int = typer.Option(0, "--retry", "-R", help="Number of retries on failure"),
@@ -1667,13 +1187,20 @@ def cmd_type(
     wait_after: str | None = typer.Option(
         None, "--wait", "-w", help="Wait condition after typing (e.g., 'network-idle')"
     ),
+    snapshot: bool = typer.Option(
+        False, "--snapshot", "-S", help="Return page snapshot after action"
+    ),
+    grep: str | None = typer.Option(
+        None, "--grep", "-g", help="Filter snapshot by regex (implies --snapshot)"
+    ),
 ) -> None:
-    """Type text into an element.
+    """Type text into an element. Auto-detects dropdowns and checkboxes.
 
     Examples:
-        webctl type 'role=textbox name~="Email"' "user@example.com"
-        webctl type 'role=textbox name~="Search"' "query" --submit
-        webctl type 'role=textbox name~="Search"' "query" --submit --wait network-idle
+        webctl type @e2 "user@example.com"
+        webctl type "Email" "user@example.com"
+        webctl type "Country" "Germany"          # auto-selects from dropdown
+        webctl type "Search" "query" --submit --snapshot --grep "result"
     """
     asyncio.run(
         run_command(
@@ -1686,23 +1213,10 @@ def cmd_type(
                 "retry": retry,
                 "retry_delay": retry_delay,
                 "wait_after": wait_after,
+                "snapshot_after": snapshot or bool(grep),
+                "grep_pattern": grep,
                 "session": _session,
             },
-        )
-    )
-
-
-@app.command("scroll")
-def cmd_scroll(
-    direction: str = typer.Argument("down", help="Direction: up, down"),
-    amount: int = typer.Option(300, "--amount", "-a", help="Scroll amount in pixels"),
-    query: str | None = typer.Option(None, "--to", "-t", help="Scroll element into view"),
-) -> None:
-    """Scroll the page."""
-    asyncio.run(
-        run_command(
-            "scroll",
-            {"direction": direction, "amount": amount, "query": query, "session": _session},
         )
     )
 
@@ -1710,9 +1224,12 @@ def cmd_scroll(
 @app.command("press")
 def cmd_press(
     key: str = typer.Argument(..., help="Key to press (e.g., Enter, Tab, Escape)"),
+    snapshot: bool = typer.Option(
+        False, "--snapshot", "-S", help="Return page snapshot after key press"
+    ),
 ) -> None:
     """Press a key."""
-    asyncio.run(run_command("press", {"key": key, "session": _session}))
+    asyncio.run(run_command("press", {"key": key, "snapshot_after": snapshot, "session": _session}))
 
 
 @app.command("select")
@@ -1800,6 +1317,44 @@ def cmd_fill_form(
     )
 
 
+@app.command("do")
+def cmd_do(
+    actions_json: str = typer.Argument(
+        ..., help='JSON array of actions: [["click","Submit"],["type","Email","user@test.com"]]'
+    ),
+    snapshot: bool = typer.Option(
+        False, "--snapshot", "-S", help="Return page snapshot after all actions"
+    ),
+) -> None:
+    """Execute multiple actions in one call.
+
+    Actions are a JSON array of [action, target, value?] tuples.
+    Supported actions: click, type, press, scroll, wait.
+
+    Examples:
+        webctl do '[["type","Email","user@test.com"],["type","Password","secret"],["click","Log in"]]'
+        webctl do '[["type","Search","query"],["press","Enter"]]' --snapshot
+    """
+    import json
+
+    try:
+        actions = json.loads(actions_json)
+    except json.JSONDecodeError as e:
+        print_error(f"Invalid JSON: {e}")
+        raise typer.Exit(1) from None
+
+    if not isinstance(actions, list):
+        print_error("Actions must be a JSON array")
+        raise typer.Exit(1)
+
+    asyncio.run(
+        run_command(
+            "do",
+            {"actions": actions, "snapshot_after": snapshot, "session": _session},
+        )
+    )
+
+
 # === Wait Commands ===
 
 
@@ -1876,7 +1431,6 @@ def cmd_console(
 
 # === Config Commands ===
 
-# Create a subcommand group for config
 config_app = typer.Typer(help="Manage webctl configuration")
 app.add_typer(config_app, name="config")
 
@@ -1906,6 +1460,7 @@ def cmd_config_show() -> None:
         f"  browser_executable_path: {config.browser_executable_path or 'unset (managed Playwright)'}"
     )
     print(f"  use_global_playwright: {config.use_global_playwright}")
+    print(f"  mobile_emulation: {config.mobile_emulation}")
     print(f"  proxy_server: {config.proxy_server or 'unset'}")
     print(f"  proxy_username: {config.proxy_username or 'unset'}")
     # Mask password for security
@@ -1934,6 +1489,7 @@ def cmd_config_get(
         "screenshot_error_dir",
         "browser_executable_path",
         "use_global_playwright",
+        "mobile_emulation",
         "proxy_server",
         "proxy_username",
         "proxy_password",
@@ -1970,6 +1526,7 @@ def cmd_config_set(
         "a11y_include_path_hint",
         "screenshot_on_error",
         "use_global_playwright",
+        "mobile_emulation",
     ]
     int_keys = ["idle_timeout"]
     nullable_str_keys = [
@@ -2009,6 +1566,7 @@ def cmd_config_set(
         "screenshot_error_dir",
         "browser_executable_path",
         "use_global_playwright",
+        "mobile_emulation",
         "proxy_server",
         "proxy_username",
         "proxy_password",

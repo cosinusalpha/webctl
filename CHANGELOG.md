@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.4.0] - 2026-03-28
+
+This release started as an attempt to add ad-blocking and automatic cookie consent handling using techniques from uBlock Origin and cookie consent extensions. That approach didn't pan out, but the effort shifted focus toward benchmarking webctl against Vercel's agent-browser — which revealed concrete opportunities to reduce round-trips, cut token usage, and simplify the agent-facing API. The result is a leaner, faster interface that lets agents do more per turn.
+
+### Added
+
+- Structured data extraction on `navigate` (JSON-LD, Open Graph, meta tags) for token-efficient page understanding without full snapshots.
+- `--snapshot`, `--grep`, `--read`, and `--search` flags on `navigate` for flexible observation modes.
+- `--snapshot` and `--grep` flags on `click` and `type` for act+observe in one turn.
+- Batch `do` command for executing multiple actions in a single call.
+- Implicit element resolution — use text descriptions, @refs, or query syntax instead of exact selectors.
+- Automatic fallbacks: cookie banner dismiss, scroll-to-find, overlay retry.
+- Auto-start sessions on first command (no mandatory `webctl start`).
+- Readability.js integration for `--read` mode (clean article extraction).
+- Landmark-aware filtering for smarter snapshot output.
+- Network idle detection improvements for media streams and WebSockets.
+- `WEBCTL_LOG` env var to record command transcripts in shell-transcript format.
+- `prompt-secret` command for human-in-the-loop credential entry.
+
+### Changed
+
+- `webctl stop` now closes both browser and daemon by default. Use `--keep-daemon` to preserve the daemon.
+- `navigate` returns structured data + page summary by default (no a11y dump). Use `--snapshot` for full accessibility tree.
+- `--read` output capped at 16,000 chars / 200 lines.
+- SKILL.md rewritten from 590 to 173 lines with decision matrix for choosing the right approach.
+- Cookie banner auto-dismiss simplified from regex patterns to CSS selector matching (40+ CMP platforms).
+
+### Removed
+
+- `--daemon` flag on `stop` (replaced by inverse `--keep-daemon`).
+
 ## [0.3.1] - 2026-01-26
 
 ### Added

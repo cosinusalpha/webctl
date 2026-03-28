@@ -20,11 +20,17 @@ from playwright.async_api import (
     async_playwright,
 )
 
-from ..config import get_profile_dir, resolve_browser_settings, resolve_proxy_settings
+from ..config import (
+    WebctlConfig,
+    get_profile_dir,
+    resolve_browser_settings,
+    resolve_proxy_settings,
+)
 from ..security.domain_policy import DomainPolicy
 from .detectors.action import ActionDetector
 from .detectors.auth import AuthDetector
 from .detectors.cookie_banner import CookieBannerDismisser
+from .detectors.network_idle import NetworkIdleDetector
 from .detectors.view_change import ViewChangeDetector, ViewChangeEvent
 from .event_emitter import EventEmitter
 
@@ -38,6 +44,7 @@ class PageInfo:
     url: str
     kind: Literal["tab", "popup"]
     view_detector: ViewChangeDetector | None = None
+    network_idle_detector: NetworkIdleDetector | None = None
     console_logs: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -56,6 +63,36 @@ class SessionState:
     auto_dismiss_cookies: bool = True  # Auto-dismiss cookie banners
     _page_counter: int = 0
     _dismissed_domains: set[str] = field(default_factory=set)  # Track domains where we dismissed
+    _navigating_pages: set[str] = field(default_factory=set)  # Pages with active navigate command
+    _emitted_actions: set[str] = field(
+        default_factory=set
+    )  # Rate-limit action events: "page_id:description"
+    # Ref store: maps @e1 -> {role, name, ...} for compact ref-based interactions
+    _ref_counter: int = 0
+    _refs: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def store_refs(self, items: list[dict[str, Any]]) -> dict[str, str]:
+        """Store element refs from a snapshot. Returns mapping of item_id -> ref."""
+        self._refs.clear()
+        self._ref_counter = 0
+        id_to_ref: dict[str, str] = {}
+        for item in items:
+            self._ref_counter += 1
+            ref = f"e{self._ref_counter}"
+            self._refs[ref] = {
+                "role": item.get("role", ""),
+                "name": item.get("name", ""),
+                "id": item.get("id", ""),
+            }
+            item_id = item.get("id", "")
+            if item_id:
+                id_to_ref[item_id] = ref
+        return id_to_ref
+
+    def resolve_ref(self, ref: str) -> dict[str, Any] | None:
+        """Resolve a @ref to element data. Accepts 'e1' or '@e1'."""
+        key = ref.lstrip("@")
+        return self._refs.get(key)
 
 
 class SessionManager:
@@ -68,6 +105,21 @@ class SessionManager:
         self._auth_detector = AuthDetector()
         self._action_detector = ActionDetector()
         self._cookie_dismisser = CookieBannerDismisser()
+
+    async def ensure_session(
+        self,
+        session_id: str,
+        mode: Literal["attended", "unattended"] | None = None,
+    ) -> SessionState:
+        """Get existing session or create a new one with default settings."""
+        existing = self.get_session(session_id)
+        if existing:
+            return existing
+
+        resolved_mode = mode or WebctlConfig.load().default_mode
+        cfg = WebctlConfig.load()
+        policy = cfg.domain_policy.policy if cfg.domain_policy.enabled else None
+        return await self.create_session(session_id, mode=resolved_mode, domain_policy=policy)
 
     async def _ensure_playwright(self) -> None:
         if self._playwright is None:
@@ -113,9 +165,18 @@ class SessionManager:
             async with aiofiles.open(state_file) as f:
                 storage_state = json.loads(await f.read())
 
-        context = await browser.new_context(
-            storage_state=storage_state, viewport={"width": 1280, "height": 720}
-        )
+        cfg = WebctlConfig.load()
+        if mode == "unattended" and cfg.mobile_emulation:
+            # Mobile emulation: cleaner pages, fewer ads, simpler layouts
+            device = self._playwright.devices["Pixel 7"]
+            context = await browser.new_context(
+                storage_state=storage_state,
+                **device,
+            )
+        else:
+            context = await browser.new_context(
+                storage_state=storage_state, viewport={"width": 1280, "height": 720}
+            )
 
         session = SessionState(
             session_id=session_id,
@@ -154,6 +215,7 @@ class SessionManager:
             )
 
         view_detector = ViewChangeDetector(page, page_id, on_view_change)
+        network_idle_detector = NetworkIdleDetector(page)
 
         page_info = PageInfo(
             page_id=page_id,
@@ -161,6 +223,7 @@ class SessionManager:
             url=page.url,
             kind=kind,
             view_detector=view_detector,
+            network_idle_detector=network_idle_detector,
         )
 
         session.pages[page_id] = page_info
@@ -214,9 +277,11 @@ class SessionManager:
         if page_id in session.pages:
             page_info = session.pages[page_id]
 
-            # Stop view detector
+            # Stop detectors
             if page_info.view_detector:
                 await page_info.view_detector.stop()
+            if page_info.network_idle_detector:
+                page_info.network_idle_detector.dispose()
 
             del session.pages[page_id]
 
@@ -242,8 +307,9 @@ class SessionManager:
         url = frame.url
         page_info.url = url
 
-        # Auto-dismiss cookie banners if enabled
-        if session.auto_dismiss_cookies:
+        # Auto-dismiss cookie banners for non-navigate navigations (link clicks, etc.)
+        # Skip if navigate handler is already handling this page to avoid races.
+        if session.auto_dismiss_cookies and page_id not in session._navigating_pages:
             await self._try_dismiss_cookies(session, page_info.page, url)
 
         # Check for auth requirement (including CAPTCHA)
@@ -259,15 +325,18 @@ class SessionManager:
             if auth_result.requires_human:
                 return
 
-        # Check for user action requirement
+        # Check for user action requirement (rate-limit: once per page per description)
         action_result = await self._action_detector.detect(page_info.page)
         if action_result.detected:
-            await self._event_emitter.emit_user_action_required(
-                page_id=page_id,
-                kind=action_result.kind,
-                description=action_result.description,
-                selector_hint=action_result.selector_hint,
-            )
+            key = f"{page_id}:{action_result.description}"
+            if key not in session._emitted_actions:
+                session._emitted_actions.add(key)
+                await self._event_emitter.emit_user_action_required(
+                    page_id=page_id,
+                    kind=action_result.kind,
+                    description=action_result.description,
+                    selector_hint=action_result.selector_hint,
+                )
 
     async def _try_dismiss_cookies(self, session: SessionState, page: Page, url: str) -> None:
         """Attempt to dismiss cookie banner for the current page."""

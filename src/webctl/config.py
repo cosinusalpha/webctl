@@ -40,6 +40,9 @@ class WebctlConfig:
     browser_executable_path: str | None = None  # Override to use a custom Chromium
     use_global_playwright: bool = False  # Allow global Playwright even if version mismatches
 
+    # Mobile emulation (unattended mode)
+    mobile_emulation: bool = True  # Use mobile device profile in unattended mode
+
     # Proxy settings
     proxy_server: str | None = None  # e.g., "http://proxy:8080"
     proxy_username: str | None = None  # optional auth
@@ -74,6 +77,7 @@ class WebctlConfig:
             default_session=data.get("default_session", "default"),
             default_mode=data.get("default_mode", "attended"),
             domain_policy=PolicyConfig.from_dict(data.get("domain_policy", {})),
+            mobile_emulation=data.get("mobile_emulation", True),
             a11y_include_bbox=data.get("a11y_include_bbox", False),
             a11y_include_path_hint=data.get("a11y_include_path_hint", True),
             screenshot_on_error=data.get("screenshot_on_error", False),
@@ -106,6 +110,7 @@ class WebctlConfig:
                     "deny": self.domain_policy.policy.deny_patterns,
                 },
             },
+            "mobile_emulation": self.mobile_emulation,
             "a11y_include_bbox": self.a11y_include_bbox,
             "a11y_include_path_hint": self.a11y_include_path_hint,
             "screenshot_on_error": self.screenshot_on_error,
@@ -208,16 +213,13 @@ def resolve_proxy_settings() -> dict[str, Any] | None:
     if not proxy_server:
         return None
 
-    # Build Playwright proxy config
     proxy_config: dict[str, Any] = {"server": proxy_server}
 
-    # Add authentication if configured (only from config file)
     if cfg.proxy_username:
         proxy_config["username"] = cfg.proxy_username
     if cfg.proxy_password:
         proxy_config["password"] = cfg.proxy_password
 
-    # Add bypass list (from env var NO_PROXY or config)
     bypass = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or cfg.proxy_bypass
     if bypass:
         proxy_config["bypass"] = bypass
@@ -225,7 +227,4 @@ def resolve_proxy_settings() -> dict[str, Any] | None:
     return proxy_config
 
 
-# Default settings (RFC SS6, SS13)
 DEFAULT_IDLE_TIMEOUT = 900  # 15 minutes
-DEFAULT_SESSION = "default"
-DEFAULT_MODE = "attended"

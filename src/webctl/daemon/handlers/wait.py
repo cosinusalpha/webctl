@@ -47,9 +47,14 @@ async def handle_wait(
         )
         return
 
+    page_info = session_manager.get_active_page_info(session_id)
+
     try:
         if until == "network-idle":
-            await page.wait_for_load_state("networkidle", timeout=timeout_ms)
+            if page_info and page_info.network_idle_detector:
+                await page_info.network_idle_detector.wait(timeout_ms=timeout_ms)
+            else:
+                await page.wait_for_load_state("networkidle", timeout=timeout_ms)
 
         elif until.startswith("view-changed:"):
             # RFC: wait --until view-changed:a11y
@@ -105,7 +110,10 @@ async def handle_wait(
 
         elif until == "stable":
             # Wait for page to be stable (no pending requests, DOM stable)
-            await page.wait_for_load_state("networkidle", timeout=timeout_ms)
+            if page_info and page_info.network_idle_detector:
+                await page_info.network_idle_detector.wait(timeout_ms=timeout_ms)
+            else:
+                await page.wait_for_load_state("networkidle", timeout=timeout_ms)
             # Additional stability check - wait for a11y tree to stabilize
             last_hash = ""
             stable_count = 0
@@ -289,24 +297,15 @@ async def _poll_until(
     return False
 
 
-async def perform_wait(page: Any, until: str, timeout: int = 30000) -> None:
-    """
-    Perform a wait operation on a page.
-
-    This is a reusable function for wait operations that can be called
-    from other handlers (e.g., click --wait).
-
-    Args:
-        page: Playwright page object
-        until: Wait condition string
-        timeout: Timeout in milliseconds
-
-    Raises:
-        TimeoutError: If wait times out
-        ValueError: If condition is invalid
-    """
+async def perform_wait(
+    page: Any, until: str, timeout: int = 30000, network_idle_detector: Any = None
+) -> None:
+    """Perform a wait operation, reusable from other handlers (e.g., click --wait)."""
     if until == "network-idle":
-        await page.wait_for_load_state("networkidle", timeout=timeout)
+        if network_idle_detector:
+            await network_idle_detector.wait(timeout_ms=timeout)
+        else:
+            await page.wait_for_load_state("networkidle", timeout=timeout)
 
     elif until == "load":
         await page.wait_for_load_state("load", timeout=timeout)
@@ -315,7 +314,10 @@ async def perform_wait(page: Any, until: str, timeout: int = 30000) -> None:
         await page.wait_for_load_state("domcontentloaded", timeout=timeout)
 
     elif until == "stable":
-        await page.wait_for_load_state("networkidle", timeout=timeout)
+        if network_idle_detector:
+            await network_idle_detector.wait(timeout_ms=timeout)
+        else:
+            await page.wait_for_load_state("networkidle", timeout=timeout)
         last_hash = ""
         stable_count = 0
         while stable_count < 3:

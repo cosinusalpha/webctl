@@ -46,7 +46,6 @@ async def extract_dom_lite_view(
     """
     options = options or DomLiteOptions()
 
-    # Extract all relevant elements in one evaluate call
     data = await page.evaluate(
         """
         (opts) => {

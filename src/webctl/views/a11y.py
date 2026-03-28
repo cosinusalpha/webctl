@@ -45,6 +45,7 @@ class A11yExtractOptions:
     names_only: bool = False  # Only output role and name (no states/attributes)
     show_query: bool = False  # Include the query string to target each element
     count_only: bool = False  # Only return stats, no items
+    compact_refs: bool = False  # Assign @refs and output compact ref format
 
 
 def parse_aria_snapshot(snapshot: str) -> list[dict[str, Any]]:
@@ -65,7 +66,6 @@ def parse_aria_snapshot(snapshot: str) -> list[dict[str, Any]]:
         if not line.strip():
             continue
 
-        # Calculate depth based on indentation
         depth = (len(line) - len(line.lstrip())) // 2
 
         line = line.strip()
@@ -79,36 +79,27 @@ def parse_aria_snapshot(snapshot: str) -> list[dict[str, Any]]:
 
         line = line[2:]  # Remove "- " prefix
 
-        # Parse role and name
-        # Format: role "name" [attributes]: content
-        # or: role "name" [attributes]
-        # or: role: content
-
         counter += 1
         item: dict[str, Any] = {
             "id": f"n{counter}",
             "enabled": True,
         }
 
-        # Extract role
         match = re.match(r"^(\w+)", line)
         if match:
             item["role"] = match.group(1)
             line = line[len(match.group(0)) :].strip()
 
-        # Extract quoted name
         if line.startswith('"'):
             end_quote = line.find('"', 1)
             if end_quote > 0:
                 item["name"] = line[1:end_quote]
                 line = line[end_quote + 1 :].strip()
 
-        # Extract attributes in brackets
         if line.startswith("["):
             end_bracket = line.find("]")
             if end_bracket > 0:
                 attrs_str = line[1:end_bracket]
-                # Parse attributes like level=1, checked=true
                 for attr in attrs_str.split(","):
                     attr = attr.strip()
                     if "=" in attr:
@@ -125,13 +116,11 @@ def parse_aria_snapshot(snapshot: str) -> list[dict[str, Any]]:
                             item[key] = value
                 line = line[end_bracket + 1 :].strip()
 
-        # Extract content after colon
         if line.startswith(":"):
             content = line[1:].strip()
             if content and "name" not in item:
-                item["description"] = content
+                item["name"] = content
 
-        # Add depth for path calculation
         item["_depth"] = depth
 
         items.append(item)
@@ -140,17 +129,7 @@ def parse_aria_snapshot(snapshot: str) -> list[dict[str, Any]]:
 
 
 def _filter_within_scope(items: list[dict[str, Any]], within_query: str) -> list[dict[str, Any]]:
-    """
-    Filter items to only include elements within a specified container.
-
-    Args:
-        items: List of a11y items with _depth field
-        within_query: Query like "role=main" or "role=dialog name~=Settings"
-
-    Returns:
-        Filtered list of items that are descendants of the matched element
-    """
-    # Parse the within query to extract role and name
+    """Filter items to only those within a specified container."""
     query_role = None
     query_name = None
     query_name_partial = False
@@ -229,7 +208,6 @@ async def extract_a11y_view(
     """
     options = options or A11yExtractOptions()
 
-    # Use the new aria_snapshot API
     try:
         snapshot_str = await page.locator("body").aria_snapshot()
     except Exception:
@@ -240,11 +218,9 @@ async def extract_a11y_view(
 
     items = parse_aria_snapshot(snapshot_str)
 
-    # Apply --within scoping if specified
     if options.within:
         items = _filter_within_scope(items, options.within)
 
-    # Build filter config from options
     filter_config = SnapshotFilter(
         max_depth=options.max_depth,
         limit=options.limit,
@@ -254,18 +230,15 @@ async def extract_a11y_view(
         max_name_length=options.max_name_length,
     )
 
-    # Build path hints
     path_stack: list[tuple[int, str]] = []
     processed_items: list[dict[str, Any]] = []
 
     for item in items:
         depth = item.get("_depth", 0)
 
-        # Maintain path stack
         while path_stack and path_stack[-1][0] >= depth:
             path_stack.pop()
 
-        # Build path segment
         path_segment = item.get("role", "unknown")
         name = item.get("name", "")
         if name:
@@ -274,53 +247,42 @@ async def extract_a11y_view(
 
         path_stack.append((depth, path_segment))
 
-        # Build path_hint before we potentially filter
         path_hint = " > ".join(seg for _, seg in path_stack)
 
-        # Redact sensitive content
         if name:
             is_password = item.get("role") == "textbox" and "password" in name.lower()
             item["name"] = redact_if_sensitive(name, is_password)
 
-        # Add path_hint
         if options.include_path_hint:
             item["path_hint"] = path_hint
 
         processed_items.append(item)
 
-    # Apply filtering
     filtered_items = filter_a11y_items(iter(processed_items), filter_config)
 
     for item in filtered_items:
-        # Remove internal depth field
         item.pop("_depth", None)
 
-        # Apply visible_only filter (check if element is in viewport)
         if options.visible_only:
             bbox = await _get_element_bbox(page, item)
             if bbox:
                 viewport = page.viewport_size
                 if viewport:
-                    # Check if element is outside viewport
                     if (
                         bbox["x"] + bbox["width"] < 0
                         or bbox["y"] + bbox["height"] < 0
                         or bbox["x"] > viewport["width"]
                         or bbox["y"] > viewport["height"]
                     ):
-                        continue  # Skip off-viewport elements
-                # Add bbox if requested
+                        continue
                 if options.include_bbox:
                     item["bbox"] = bbox
         elif options.include_bbox:
-            # Add bbox if requested (expensive)
             bbox = await _get_element_bbox(page, item)
             if bbox:
                 item["bbox"] = bbox
 
-        # Build final item
         if options.names_only:
-            # Strip to just role and name for minimal output
             result: dict[str, Any] = {
                 "type": "item",
                 "view": "a11y",
@@ -335,7 +297,6 @@ async def extract_a11y_view(
                 **item,
             }
 
-        # Add query string if requested
         if options.show_query:
             role = item.get("role", "")
             name = item.get("name", "")

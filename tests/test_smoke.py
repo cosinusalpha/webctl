@@ -131,7 +131,7 @@ class TestConfig:
 def browser_session():
     """Start a browser session for tests, cleanup after."""
     # Stop any existing daemon first
-    run_webctl("stop", "--daemon", check=False)
+    run_webctl("stop", check=False)
     time.sleep(0.5)
 
     # Start fresh session - use headless mode on CI
@@ -145,7 +145,7 @@ def browser_session():
     yield
 
     # Cleanup
-    run_webctl("stop", "--daemon", check=False)
+    run_webctl("stop", check=False)
 
 
 @pytest.mark.usefixtures("browser_session")
