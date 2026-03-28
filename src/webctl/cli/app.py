@@ -573,7 +573,7 @@ def cmd_agent_prompt(
                 "webctl start",
                 'webctl navigate "https://example.com"',
                 "webctl snapshot --interactive-only",
-                "webctl stop --daemon",
+                "webctl stop",
             ],
             "common_commands": {
                 "start": "webctl start",
@@ -581,7 +581,7 @@ def cmd_agent_prompt(
                 "snapshot": "webctl snapshot --interactive-only",
                 "click": "webctl click 'role=button name~=\"Text\"'",
                 "type": 'webctl type \'role=textbox name~="Field"\' "value"',
-                "stop": "webctl stop --daemon",
+                "stop": "webctl stop",
             },
         }
         print(json_module.dumps(data, indent=2))

@@ -40,16 +40,16 @@ Beyond filtering, CLI gives you:
 
 ## Benchmarks
 
-Head-to-head comparison of **webctl** vs **[agent-browser](https://github.com/vercel-labs/agent-browser)** (Vercel's Playwright MCP tool) across 4 real-world web tasks. Both tools use Claude Opus as the driving agent.
+Head-to-head comparison of **webctl** vs **[agent-browser](https://github.com/vercel-labs/agent-browser)** (Vercel's browser cli) across 4 real-world web tasks. Both tools use Claude Opus as the driving agent.
 
-| Task                    |  webctl    |        |        |        | agent-browser |        |        |        |
-|-------------------------|:----------:|:------:|:------:|:------:|:-------------:|:------:|:------:|:------:|
-|                         |  Score     | Turns  | Tokens |  Cost  |     Score     | Turns  | Tokens |  Cost  |
-| Amazon product lookup   | **9**/10   |   11   |  119k  | $0.25  |     9/10      |   18   |  247k  | $0.28  |
-| Spiegel.de headlines    | **9**/10   |    7   |   62k  | $0.14  |     8/10      |    5   |   47k  | $0.12  |
-| Google Maps restaurants | **8**/10   |    9   |  106k  | $0.22  |     7/10      |   13   |  185k  | $0.29  |
-| DuckDuckGo search       | **8**/10   |    4   |   29k  | $0.11  |     4/10      |   17   |  253k  | $0.36  |
-| **Average**             | **8.5**/10 | **8**  | **79k**|**$0.18**|     7.0/10   |   13   |  183k  | $0.26  |
+| Task                    |   webctl   |       |         |           | agent-browser |       |        |       |
+|-------------------------|:----------:|:-----:|:-------:|:---------:|:-------------:|:-----:|:------:|:-----:|
+|                         |   Score    | Turns | Tokens  |   Cost    |     Score     | Turns | Tokens | Cost  |
+| Amazon product lookup   |  **9**/10  |  11   |  119k   |   $0.25   |     9/10      |  18   |  247k  | $0.28 |
+| Spiegel.de headlines    |  **9**/10  |   7   |   62k   |   $0.14   |     8/10      |   5   |  47k   | $0.12 |
+| Google Maps restaurants |  **8**/10  |   9   |  106k   |   $0.22   |     7/10      |  13   |  185k  | $0.29 |
+| DuckDuckGo search       |  **8**/10  |   4   |   29k   |   $0.11   |     4/10      |  17   |  253k  | $0.36 |
+| **Average**             | **8.5**/10 | **8** | **79k** | **$0.18** |    7.0/10     |  13   |  183k  | $0.26 |
 
 webctl achieves higher quality scores on all 4 tasks at lower cost. Landmark-aware snapshots collapse navigation/sidebars and prioritize content, while automatic fallbacks (cookie dismiss, scroll-to-find, overlay retry) handle complex sites without extra agent turns.
 
@@ -321,6 +321,19 @@ Check and clear settings:
 webctl config show              # View all settings
 webctl config set proxy_server null   # Clear proxy
 ```
+
+### Command Logging
+
+Record all webctl commands and their output in shell-transcript format:
+
+```bash
+export WEBCTL_LOG=/tmp/webctl.log
+webctl navigate "https://example.com"
+webctl click "Submit"
+cat /tmp/webctl.log   # Review transcript
+```
+
+Each command is logged with a `$ ` prefix followed by its output, appended to the file.
 
 ### Domain Policy
 
