@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.1] - 2026-03-28
+
+### Fixed
+
+- Codex prompt (`AGENTS.md`) now includes escalation hint for sandbox environments where Unix socket creation is blocked (#13).
+
 ## [0.4.0] - 2026-03-28
 
 This release started as an attempt to add ad-blocking and automatic cookie consent handling using techniques from uBlock Origin and cookie consent extensions. That approach didn't pan out, but the effort shifted focus toward benchmarking webctl against Vercel's agent-browser — which revealed concrete opportunities to reduce round-trips, cut token usage, and simplify the agent-facing API. The result is a leaner, faster interface that lets agents do more per turn.

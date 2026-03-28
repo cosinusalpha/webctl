@@ -542,6 +542,11 @@ Navigate: `webctl navigate "url"` (auto-starts session) | End: `webctl stop`
 Run `webctl --help` for more.
 """
 
+# Extra hint appended to Codex AGENTS.md
+CODEX_SUFFIX = """## Codex Sandbox
+webctl uses Unix sockets. In the Codex sandbox, run webctl commands with escalation enabled if you see `Operation not permitted` or `Failed to start daemon`.
+"""
+
 # Full skill content for skill-based agents (Claude, Goose)
 # These are loaded on-demand when agent needs browser automation
 
@@ -656,6 +661,7 @@ AGENT_CONFIGS = {
         "file": Path("AGENTS.md"),
         "global_file": Path.home() / ".codex" / "AGENTS.md",
         "description": "OpenAI Codex CLI",
+        "suffix": CODEX_SUFFIX,
     },
 }
 
@@ -823,6 +829,9 @@ def cmd_init(
 
         # Determine content to write
         content = SKILL_CONTENT if is_skill else AGENT_PROMPT
+        suffix = config.get("suffix", "")
+        if suffix:
+            content = content.rstrip() + "\n\n" + suffix
 
         exists = filepath.exists()
         has_webctl = _file_contains_webctl(filepath)
