@@ -27,6 +27,12 @@ This release started as an attempt to add ad-blocking and automatic cookie conse
 - SKILL.md rewritten from 590 to 173 lines with decision matrix for choosing the right approach.
 - Cookie banner auto-dismiss simplified from regex patterns to CSS selector matching (40+ CMP platforms).
 
+### Fixed
+
+- `webctl doctor` now reports default mode (attended/headless), domain policy status, and warns when no display server is detected in attended mode (#14).
+- Domain policy block errors now include the configured allow/deny list for easier debugging (#9).
+- Browser launch failures now surface actionable messages for sandboxed environments (Codex, Docker, CI) with specific remediation steps (#13).
+
 ### Removed
 
 - `--daemon` flag on `stop` (replaced by inverse `--keep-daemon`).
