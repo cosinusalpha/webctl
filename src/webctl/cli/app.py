@@ -1432,7 +1432,6 @@ def cmd_console(
 
 # === Config Commands ===
 
-# Create a subcommand group for config
 config_app = typer.Typer(help="Manage webctl configuration")
 app.add_typer(config_app, name="config")
 

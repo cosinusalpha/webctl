@@ -10,7 +10,6 @@ import asyncio
 
 from playwright.async_api import Page, Request
 
-
 # Resource types that should not block idle detection
 _IGNORED_RESOURCE_TYPES = frozenset({"media", "websocket", "eventsource"})
 
@@ -69,8 +68,8 @@ class NetworkIdleDetector:
         self._idle_future = asyncio.get_event_loop().create_future()
         try:
             await asyncio.wait_for(self._idle_future, timeout=timeout_ms / 1000.0)
-        except asyncio.TimeoutError:
-            raise TimeoutError(f"Network not idle after {timeout_ms}ms")
+        except TimeoutError:
+            raise TimeoutError(f"Network not idle after {timeout_ms}ms") from None
         finally:
             self._idle_future = None
 

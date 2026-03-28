@@ -221,7 +221,6 @@ async def extract_a11y_view(
     if options.within:
         items = _filter_within_scope(items, options.within)
 
-    # Build filter config from options
     filter_config = SnapshotFilter(
         max_depth=options.max_depth,
         limit=options.limit,
@@ -231,18 +230,15 @@ async def extract_a11y_view(
         max_name_length=options.max_name_length,
     )
 
-    # Build path hints
     path_stack: list[tuple[int, str]] = []
     processed_items: list[dict[str, Any]] = []
 
     for item in items:
         depth = item.get("_depth", 0)
 
-        # Maintain path stack
         while path_stack and path_stack[-1][0] >= depth:
             path_stack.pop()
 
-        # Build path segment
         path_segment = item.get("role", "unknown")
         name = item.get("name", "")
         if name:
@@ -251,53 +247,42 @@ async def extract_a11y_view(
 
         path_stack.append((depth, path_segment))
 
-        # Build path_hint before we potentially filter
         path_hint = " > ".join(seg for _, seg in path_stack)
 
-        # Redact sensitive content
         if name:
             is_password = item.get("role") == "textbox" and "password" in name.lower()
             item["name"] = redact_if_sensitive(name, is_password)
 
-        # Add path_hint
         if options.include_path_hint:
             item["path_hint"] = path_hint
 
         processed_items.append(item)
 
-    # Apply filtering
     filtered_items = filter_a11y_items(iter(processed_items), filter_config)
 
     for item in filtered_items:
-        # Remove internal depth field
         item.pop("_depth", None)
 
-        # Apply visible_only filter (check if element is in viewport)
         if options.visible_only:
             bbox = await _get_element_bbox(page, item)
             if bbox:
                 viewport = page.viewport_size
                 if viewport:
-                    # Check if element is outside viewport
                     if (
                         bbox["x"] + bbox["width"] < 0
                         or bbox["y"] + bbox["height"] < 0
                         or bbox["x"] > viewport["width"]
                         or bbox["y"] > viewport["height"]
                     ):
-                        continue  # Skip off-viewport elements
-                # Add bbox if requested
+                        continue
                 if options.include_bbox:
                     item["bbox"] = bbox
         elif options.include_bbox:
-            # Add bbox if requested (expensive)
             bbox = await _get_element_bbox(page, item)
             if bbox:
                 item["bbox"] = bbox
 
-        # Build final item
         if options.names_only:
-            # Strip to just role and name for minimal output
             result: dict[str, Any] = {
                 "type": "item",
                 "view": "a11y",
@@ -312,7 +297,6 @@ async def extract_a11y_view(
                 **item,
             }
 
-        # Add query string if requested
         if options.show_query:
             role = item.get("role", "")
             name = item.get("name", "")

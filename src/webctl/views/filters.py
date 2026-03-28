@@ -115,16 +115,7 @@ def filter_a11y_items(
     items: Iterator[dict[str, Any]],
     filter_config: SnapshotFilter,
 ) -> Iterator[dict[str, Any]]:
-    """
-    Filter a11y items based on configuration.
-
-    Args:
-        items: Iterator of a11y item dicts
-        filter_config: Filtering configuration
-
-    Yields:
-        Filtered items
-    """
+    """Filter a11y items based on configuration."""
     import re
 
     # Compile grep pattern if provided
@@ -211,7 +202,7 @@ def landmark_aware_filter(items: list[dict[str, Any]], allowed_roles: frozenset[
 
     # Pre-compute: large dialogs (>20 children) are content panels, not blocking modals —
     # collapse them like complementary/region instead of expanding as priority
-    _LARGE_DIALOG_THRESHOLD = 20
+    large_dialog_threshold = 20
     large_dialog_indices: set[int] = set()
     for idx, item in enumerate(items):
         if item.get("role") in _PRIORITY_ROLES:
@@ -221,7 +212,7 @@ def landmark_aware_filter(items: list[dict[str, Any]], allowed_roles: frozenset[
                 if items[j].get("_depth", 0) <= d_depth:
                     break
                 count += 1
-            if count > _LARGE_DIALOG_THRESHOLD:
+            if count > large_dialog_threshold:
                 large_dialog_indices.add(idx)
 
     # Partition items by landmark context
@@ -363,7 +354,7 @@ def collapse_containers(items: list[dict[str, Any]], threshold: int = 5) -> list
         result.append(item)
 
     # Finalize any remaining open containers
-    for c_depth, c_count, c_idx in container_stack:
+    for _c_depth, c_count, c_idx in container_stack:
         if c_count > threshold:
             parent = result[c_idx]
             name = parent.get("name", "")

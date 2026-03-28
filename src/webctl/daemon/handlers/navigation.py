@@ -8,65 +8,19 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from ...protocol.messages import DoneResponse, ErrorResponse, ItemResponse, Request, Response
-from ...views.a11y import A11yExtractOptions, extract_a11y_view, parse_aria_snapshot
-from ...views.filters import NAVIGATE_ROLES, collapse_containers, deduplicate_adjacent, landmark_aware_filter
+from ...views.a11y import parse_aria_snapshot
+from ...views.filters import (
+    NAVIGATE_ROLES,
+    collapse_containers,
+    deduplicate_adjacent,
+    landmark_aware_filter,
+)
 from ..detectors.cookie_banner import dismiss_cookie_banner
 from ..event_emitter import EventEmitter
 from ..session_manager import SessionManager
 from .registry import register
 
 _NAVIGATE_ROLES_STR = ",".join(NAVIGATE_ROLES)
-
-
-async def _build_snapshot_with_refs(
-    page: "Page",  # noqa: F821
-    session: Any,
-    request: Request,
-    interactive_only: bool = False,
-    roles: str | None = None,
-    max_name_length: int | None = None,
-    auto_limit: int | None = None,
-) -> tuple[list[Response], dict[str, Any]]:
-    """Build a snapshot with @refs, return (responses, stats)."""
-    options = A11yExtractOptions(
-        include_path_hint=False,
-        interactive_only=interactive_only,
-        compact_refs=True,
-        roles=roles,
-        max_name_length=max_name_length,
-    )
-
-    collected: list[dict[str, Any]] = []
-    stats: dict[str, Any] = {"total": 0, "by_role": {}}
-    async for item in extract_a11y_view(page, options):
-        stats["total"] += 1
-        role = item.get("role", "unknown")
-        stats["by_role"][role] = stats["by_role"].get(role, 0) + 1
-        collected.append(item)
-
-    # Auto-limit: truncate and hint if too many elements
-    truncated = False
-    if auto_limit and len(collected) > auto_limit:
-        truncated = True
-        stats["total_before_limit"] = len(collected)
-        collected = collected[:auto_limit]
-        stats["total"] = auto_limit
-        stats["truncated"] = True
-        stats["hint"] = "Use 'snapshot --grep \"pattern\"' or '--within \"role=main\"' to narrow scope"
-
-    # Store refs in session
-    if session:
-        id_to_ref = session.store_refs(collected)
-        for item in collected:
-            item_id = item.get("id", "")
-            if item_id in id_to_ref:
-                item["ref"] = id_to_ref[item_id]
-
-    responses: list[Response] = []
-    for item in collected:
-        responses.append(ItemResponse(req_id=request.req_id, view="a11y", data=item))
-
-    return responses, stats
 
 
 async def _build_smart_navigate_snapshot(

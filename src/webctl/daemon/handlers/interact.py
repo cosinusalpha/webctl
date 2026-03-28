@@ -12,9 +12,10 @@ from typing import Any, TypeVar, cast
 from playwright.async_api import Page
 
 from ...exceptions import AmbiguousTargetError, NoMatchError, ParseError
-from ...protocol.messages import DoneResponse, ErrorResponse, ItemResponse, Request, Response
+from ...protocol.messages import DoneResponse, ErrorResponse, Request, Response
 from ...query.parser import parse_query
 from ...query.resolver import QueryResolver
+from ...views.filters import INTERACTIVE_ROLES
 from ..session_manager import SessionManager
 from .error_screenshot import capture_error_screenshot
 from .registry import register
@@ -41,10 +42,6 @@ async def with_retry(
     raise RuntimeError("Retry failed with no error")
 
 
-# Aria role type from Playwright
-AriaRole = str  # Playwright uses Literal type, we use str for flexibility
-
-
 @dataclass
 class ResolveError:
     """Detailed error info from element resolution."""
@@ -60,7 +57,6 @@ class ResolveSuccess:
     """Successful resolution result."""
 
     element: dict[str, Any]
-    all_matches: list[dict[str, Any]] | None = None
 
 
 async def resolve_element_detailed(
@@ -69,7 +65,6 @@ async def resolve_element_detailed(
     """Resolve a query to a single element with detailed error info."""
     from ...views.a11y import parse_aria_snapshot
 
-    # Get snapshot
     try:
         snapshot_str = await page.locator("body").aria_snapshot()
     except Exception as e:
@@ -89,10 +84,9 @@ async def resolve_element_detailed(
             ],
         )
 
-    # Parse snapshot
     items = parse_aria_snapshot(snapshot_str)
 
-    # Collect available roles and names for suggestions
+    # For error suggestions
     available_roles: set[str] = set()
     available_names: list[str] = []
     for item in items:
@@ -101,7 +95,6 @@ async def resolve_element_detailed(
         if item.get("name"):
             available_names.append(item["name"])
 
-    # Parse query
     try:
         query = parse_query(query_str)
     except ParseError as e:
@@ -115,7 +108,6 @@ async def resolve_element_detailed(
             ],
         )
 
-    # Extract role/name from query for better suggestions
     query_role = None
     query_name = None
     role_match = re.search(r"role=(\w+)", query_str)
@@ -125,22 +117,17 @@ async def resolve_element_detailed(
     if name_match:
         query_name = name_match.group(1)
 
-    # Create tree and resolve
     tree: dict[str, Any] = {"role": "root", "children": items}
     resolver = QueryResolver(tree, strict=strict)
 
     try:
         result = resolver.resolve(query)
         if result.count > 0:
-            return ResolveSuccess(
-                element=result.matches[0],
-                all_matches=result.matches if result.count > 1 else None,
-            )
+            return ResolveSuccess(element=result.matches[0])
     except NoMatchError:
         suggestions = []
         similar_elements = []
 
-        # Role suggestion
         if query_role and query_role not in available_roles:
             similar_roles = get_close_matches(query_role, list(available_roles), n=3, cutoff=0.6)
             if similar_roles:
@@ -210,34 +197,10 @@ async def resolve_element_detailed(
     )
 
 
-async def resolve_element(page: Page, query_str: str, strict: bool = True) -> dict[str, Any] | None:
-    """Resolve a query to a single element (simple API for backward compat)."""
-    result = await resolve_element_detailed(page, query_str, strict)
-    if isinstance(result, ResolveSuccess):
-        return result.element
-    return None
-
-
-def resolve_ref_to_query(session_state: Any, query_str: str) -> str:
-    """If query_str is a @ref (e.g. '@e1'), resolve it to a role/name query. Otherwise pass through."""
-    if not query_str.startswith("@"):
-        return query_str
-    ref_data = session_state.resolve_ref(query_str)
-    if ref_data is None:
-        return query_str  # Let it fail downstream with a clear error
-    role = ref_data.get("role", "")
-    name = ref_data.get("name", "")
-    if name:
-        escaped = name.replace('"', '\\"')
-        return f'role={role} name~="{escaped}"'
-    return f"role={role}"
-
-
 # --- Role categories for implicit resolution ---
 CLICKABLE_ROLES = frozenset({"button", "link", "menuitem", "tab", "option", "treeitem", "switch"})
 TYPEABLE_ROLES = frozenset({"textbox", "searchbox", "combobox", "spinbutton", "listbox"})
 CHECKABLE_ROLES = frozenset({"checkbox", "radio", "switch"})
-from ...views.filters import INTERACTIVE_ROLES
 
 
 async def resolve_searchbox(page: Page) -> ResolveSuccess | ResolveError:

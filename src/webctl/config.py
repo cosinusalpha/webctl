@@ -213,16 +213,13 @@ def resolve_proxy_settings() -> dict[str, Any] | None:
     if not proxy_server:
         return None
 
-    # Build Playwright proxy config
     proxy_config: dict[str, Any] = {"server": proxy_server}
 
-    # Add authentication if configured (only from config file)
     if cfg.proxy_username:
         proxy_config["username"] = cfg.proxy_username
     if cfg.proxy_password:
         proxy_config["password"] = cfg.proxy_password
 
-    # Add bypass list (from env var NO_PROXY or config)
     bypass = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or cfg.proxy_bypass
     if bypass:
         proxy_config["bypass"] = bypass
@@ -230,7 +227,4 @@ def resolve_proxy_settings() -> dict[str, Any] | None:
     return proxy_config
 
 
-# Default settings (RFC SS6, SS13)
 DEFAULT_IDLE_TIMEOUT = 900  # 15 minutes
-DEFAULT_SESSION = "default"
-DEFAULT_MODE = "attended"

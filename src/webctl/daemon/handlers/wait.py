@@ -300,22 +300,7 @@ async def _poll_until(
 async def perform_wait(
     page: Any, until: str, timeout: int = 30000, network_idle_detector: Any = None
 ) -> None:
-    """
-    Perform a wait operation on a page.
-
-    This is a reusable function for wait operations that can be called
-    from other handlers (e.g., click --wait).
-
-    Args:
-        page: Playwright page object
-        until: Wait condition string
-        timeout: Timeout in milliseconds
-        network_idle_detector: Optional NetworkIdleDetector for custom idle
-
-    Raises:
-        TimeoutError: If wait times out
-        ValueError: If condition is invalid
-    """
+    """Perform a wait operation, reusable from other handlers (e.g., click --wait)."""
     if until == "network-idle":
         if network_idle_detector:
             await network_idle_detector.wait(timeout_ms=timeout)

@@ -127,7 +127,6 @@ def _extract_rating(item: dict, lines: list[str]) -> None:
 
 async def _extract_structured_data(page: Page) -> str:
     """Extract JSON-LD, Open Graph, and meta tags. Returns formatted markdown or empty string."""
-    import json
 
     try:
         raw = await page.evaluate(_STRUCTURED_DATA_JS)
@@ -259,17 +258,17 @@ async def _extract_structured_data(page: Page) -> str:
 
     # Open Graph fallback (if JSON-LD didn't give us key info)
     og = raw.get("og", {})
-    if og and not any("Price:" in l for l in lines):
+    if og and not any("Price:" in line for line in lines):
         if og.get("og:price:amount"):
             currency = og.get("og:price:currency", "")
             lines.append(f"- **Price: {og['og:price:amount']} {currency}**")
-    if og.get("og:description") and not any("Description:" in l for l in lines):
+    if og.get("og:description") and not any("Description:" in line for line in lines):
         desc = og["og:description"][:200]
         lines.append(f"- Description: {desc}")
 
     # Meta description fallback
     meta = raw.get("meta", {})
-    if meta.get("description") and not any("Description:" in l for l in lines):
+    if meta.get("description") and not any("Description:" in line for line in lines):
         lines.append(f"- Description: {meta['description'][:200]}")
 
     if not lines:
@@ -281,11 +280,9 @@ async def _extract_structured_data(page: Page) -> str:
 async def extract_markdown_view(page: Page) -> AsyncIterator[dict[str, Any]]:
     """Extract readable content as markdown."""
 
-    # Extract structured data (JSON-LD, Open Graph, meta)
     structured = await _extract_structured_data(page)
 
-    # Try Readability.js first (best for articles).
-    # Fall back to full page content + MarkItDown (handles everything else).
+    # Readability.js first (articles), full page + MarkItDown as fallback
     html = await _extract_readability(page)
     if not html:
         html = await page.content()

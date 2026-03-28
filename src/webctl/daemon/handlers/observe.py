@@ -12,7 +12,6 @@ from ...protocol.messages import DoneResponse, ErrorResponse, ItemResponse, Requ
 from ...query.parser import parse_query
 from ...views.a11y import A11yExtractOptions, extract_a11y_view, parse_aria_snapshot
 from ...views.dom_lite import DomLiteOptions, extract_dom_lite_view
-from ...views.filters import INTERACTIVE_ROLES, LANDMARK_ROLES, STRUCTURAL_ROLES
 from ...views.markdown import extract_markdown_view
 from ..session_manager import SessionManager
 from .registry import register
