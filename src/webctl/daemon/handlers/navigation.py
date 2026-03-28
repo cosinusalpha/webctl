@@ -5,7 +5,7 @@ Navigation command handlers.
 import asyncio
 import re
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ...protocol.messages import DoneResponse, ErrorResponse, ItemResponse, Request, Response
 from ...views.a11y import parse_aria_snapshot
@@ -19,6 +19,9 @@ from ..detectors.cookie_banner import dismiss_cookie_banner
 from ..event_emitter import EventEmitter
 from ..session_manager import SessionManager
 from .registry import register
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
 
 _NAVIGATE_ROLES_STR = ",".join(NAVIGATE_ROLES)
 
@@ -189,6 +192,7 @@ async def handle_navigate(
     if not page:
         # All pages closed — open a fresh one so navigate always works
         try:
+            assert session.context is not None
             page = await session.context.new_page()
             await session_manager._register_page(session, page, "tab")
         except Exception as e:
@@ -206,7 +210,8 @@ async def handle_navigate(
 
         # Mark page as navigating to prevent session_manager's _on_navigation
         # from racing with our cookie dismiss below
-        session._navigating_pages.add(page_id)
+        if page_id is not None:
+            session._navigating_pages.add(page_id)
 
         # Navigate — domcontentloaded is fast, then custom idle fills the gap
         await page.goto(url, wait_until=wait_until)
@@ -226,7 +231,8 @@ async def handle_navigate(
             await asyncio.sleep(2.0)
             cookie_result = await dismiss_cookie_banner(page)
 
-        session._navigating_pages.discard(page_id)
+        if page_id is not None:
+            session._navigating_pages.discard(page_id)
 
         await event_emitter.emit_navigation_finished(page.url, page_id)
 
@@ -332,7 +338,8 @@ async def handle_navigate(
             summary=summary,
         )
     except Exception as e:
-        session._navigating_pages.discard(page_id)
+        if page_id is not None:
+            session._navigating_pages.discard(page_id)
         yield ErrorResponse(req_id=request.req_id, error=str(e))
 
 

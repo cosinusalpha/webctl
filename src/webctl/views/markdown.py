@@ -50,7 +50,7 @@ def _get_markitdown() -> MarkItDown:
 async def _extract_readability(page: Page) -> str | None:
     """Try Readability.js extraction. Returns HTML or None."""
     js = _get_readability_js()
-    result = await page.evaluate(
+    result: str | None = await page.evaluate(
         """([js]) => {
             try {
                 const script = new Function(js + '; return Readability;');
@@ -100,7 +100,7 @@ _STRUCTURED_DATA_JS = """
 """
 
 
-def _extract_offers(item: dict, lines: list[str]) -> None:
+def _extract_offers(item: dict[str, Any], lines: list[str]) -> None:
     """Extract price/availability from offers field into lines."""
     offers = item.get("offers", {})
     if isinstance(offers, list):
@@ -115,7 +115,7 @@ def _extract_offers(item: dict, lines: list[str]) -> None:
         lines.append(f"- Availability: {avail}")
 
 
-def _extract_rating(item: dict, lines: list[str]) -> None:
+def _extract_rating(item: dict[str, Any], lines: list[str]) -> None:
     """Extract aggregateRating into lines."""
     rating = item.get("aggregateRating", {})
     if rating:

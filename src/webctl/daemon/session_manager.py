@@ -109,7 +109,7 @@ class SessionManager:
     async def ensure_session(
         self,
         session_id: str,
-        mode: str | None = None,
+        mode: Literal["attended", "unattended"] | None = None,
     ) -> SessionState:
         """Get existing session or create a new one with default settings."""
         existing = self.get_session(session_id)

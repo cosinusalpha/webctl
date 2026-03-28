@@ -402,7 +402,7 @@ async def resolve_with_fallbacks(
             pass
 
     # Fallback 2: Scroll down and retry (element may be below fold)
-    if result.code == "no_match":
+    if isinstance(result, ResolveError) and result.code == "no_match":
         for _ in range(max_scrolls):
             await page.mouse.wheel(0, 600)
             await asyncio.sleep(0.5)
