@@ -181,9 +181,16 @@ async def handle_navigate(
     if session.domain_policy:
         allowed, reason = session.domain_policy.is_allowed(url)
         if not allowed:
+            policy = session.domain_policy
+            if policy.mode == "allow" and policy.allow_patterns:
+                hint = f" Allowed domains: {', '.join(policy.allow_patterns)}"
+            elif policy.mode == "deny" and policy.deny_patterns:
+                hint = f" Denied domains: {', '.join(policy.deny_patterns)}"
+            else:
+                hint = ""
             yield ErrorResponse(
                 req_id=request.req_id,
-                error=f"Navigation blocked: {reason}",
+                error=f"Navigation blocked: {reason}.{hint}",
                 code="domain_blocked",
             )
             return
