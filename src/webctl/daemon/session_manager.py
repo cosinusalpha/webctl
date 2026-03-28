@@ -156,7 +156,21 @@ class SessionManager:
         if proxy_config:
             launch_kwargs["proxy"] = proxy_config
 
-        browser = await self._playwright.chromium.launch(**launch_kwargs)
+        try:
+            browser = await self._playwright.chromium.launch(**launch_kwargs)
+        except Exception as e:
+            msg = str(e)
+            if "executable" in msg.lower() or "no such file" in msg.lower():
+                raise RuntimeError(
+                    f"Browser launch failed: {msg}\nRun 'webctl setup' to install the browser."
+                ) from e
+            raise RuntimeError(
+                f"Browser launch failed: {msg}\n"
+                "If running in a sandboxed environment (Codex, Docker, CI), ensure:\n"
+                "  - /dev/shm is available (or use --disable-dev-shm-usage)\n"
+                "  - System dependencies are installed (webctl doctor)\n"
+                "  - For headless mode: webctl start --mode unattended"
+            ) from e
 
         # Load saved state if exists
         state_file = profile_dir / "state.json"

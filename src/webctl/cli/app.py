@@ -474,8 +474,36 @@ def cmd_doctor() -> None:
     # Config
     from ..config import get_config_dir, get_data_dir
 
+    cfg = WebctlConfig.load()
     console.print(f"[dim]  Config: {get_config_dir()}[/dim]")
     console.print(f"[dim]  Data: {get_data_dir()}[/dim]")
+
+    # Mode
+    console.print(
+        f"[dim]  Default mode: {cfg.default_mode}"
+        f" ({'visible browser' if cfg.default_mode == 'attended' else 'headless'})[/dim]"
+    )
+
+    # Domain policy
+    if cfg.domain_policy.enabled:
+        p = cfg.domain_policy.policy
+        console.print(f"[green]✓[/green] Domain policy: {p.mode} mode")
+        if p.allow_patterns:
+            console.print(f"[dim]    Allow: {', '.join(p.allow_patterns)}[/dim]")
+        if p.deny_patterns:
+            console.print(f"[dim]    Deny: {', '.join(p.deny_patterns)}[/dim]")
+    else:
+        console.print("[dim]  Domain policy: disabled[/dim]")
+
+    # Display server check (relevant for attended mode)
+    if sys.platform != "win32" and cfg.default_mode == "attended":
+        display = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+        if not display:
+            console.print(
+                "[yellow]![/yellow] No display server detected — "
+                "attended mode may fail. Use: webctl config set default_mode unattended"
+            )
+            issues.append("No display server for attended mode")
 
     console.print()
     if issues:
@@ -848,7 +876,10 @@ def cmd_init(
 @app.command("start")
 def cmd_start(
     mode: str | None = typer.Option(
-        None, "--mode", "-m", help="Mode: attended or unattended (default: from config)"
+        None,
+        "--mode",
+        "-m",
+        help="attended = visible browser, unattended = headless (default: from config)",
     ),
     auto_setup: bool = typer.Option(
         True, "--auto-setup/--no-auto-setup", help="Auto-install browser if missing"
