@@ -76,13 +76,21 @@ class SessionState:
         self._refs.clear()
         self._ref_counter = 0
         id_to_ref: dict[str, str] = {}
+        # Track nth index per (role, name) pair for disambiguation
+        seen_counts: dict[tuple[str, str], int] = {}
         for item in items:
             self._ref_counter += 1
             ref = f"e{self._ref_counter}"
+            role = item.get("role", "")
+            name = item.get("name", "")
+            key = (role, name)
+            nth = seen_counts.get(key, 0)
+            seen_counts[key] = nth + 1
             self._refs[ref] = {
-                "role": item.get("role", ""),
-                "name": item.get("name", ""),
+                "role": role,
+                "name": name,
                 "id": item.get("id", ""),
+                "nth": nth,
             }
             item_id = item.get("id", "")
             if item_id:
@@ -458,6 +466,19 @@ class SessionManager:
         if session and session.context:
             state = await session.context.storage_state()
             state_file = session.profile_dir / "state.json"
+            async with aiofiles.open(state_file, "w") as f:
+                await f.write(json.dumps(state, indent=2))
+
+    async def save_session_as(self, session_id: str, target_name: str) -> None:
+        """Save session state under a different profile name."""
+        session = self.get_session(session_id)
+        if session and session.context:
+            from ..config import get_profile_dir
+
+            target_dir = get_profile_dir(target_name)
+            target_dir.mkdir(parents=True, exist_ok=True)
+            state = await session.context.storage_state()
+            state_file = target_dir / "state.json"
             async with aiofiles.open(state_file, "w") as f:
                 await f.write(json.dumps(state, indent=2))
 

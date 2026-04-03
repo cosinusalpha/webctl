@@ -309,12 +309,12 @@ async def extract_markdown_view(page: Page) -> AsyncIterator[dict[str, Any]]:
         last_para = md.rfind("\n\n")
         if last_para > MAX_CONTENT_LENGTH // 2:
             md = md[:last_para]
-        md += "\n\n[... content truncated. Use snapshot --read --force for full content ...]"
+        md += "\n\n[... content truncated. Full page content exceeds display limit ...]"
         truncated = True
     md_lines = md.split("\n")
     if len(md_lines) > MAX_CONTENT_LINES:
         md = "\n".join(md_lines[:MAX_CONTENT_LINES])
-        md += "\n\n[... content truncated at 200 lines. Use snapshot --read --force for full content ...]"
+        md += "\n\n[... content truncated at 200 lines. Full page content exceeds display limit ...]"
         truncated = True
 
     # Redact sensitive content

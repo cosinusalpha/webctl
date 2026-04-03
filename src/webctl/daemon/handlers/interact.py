@@ -350,12 +350,26 @@ async def resolve_target(
     preferred_roles: frozenset[str] | None = None,
 ) -> ResolveSuccess | ResolveError:
     """Smart element resolution: @ref, query syntax, or text description."""
-    # 1. @ref
+    # 1. @ref — resolve directly using stored role/name/nth (no re-search)
     if target.startswith("@") and session:
         ref_data = session.resolve_ref(target)
         if ref_data:
             role = ref_data.get("role", "")
             name = ref_data.get("name", "")
+            nth = ref_data.get("nth", 0)
+            # Build locator directly — exact match + nth avoids ambiguity
+            locator = (
+                page.get_by_role(cast(Any, role), name=name, exact=True)
+                if name
+                else page.get_by_role(cast(Any, role))
+            )
+            try:
+                count = await locator.count()
+                if count > nth:
+                    return ResolveSuccess(element=ref_data)
+            except Exception:
+                pass
+            # Fallback: fuzzy match if page structure changed since snapshot
             if name:
                 escaped = name.replace('"', '\\"')
                 query_str = f'role={role} name~="{escaped}"'
@@ -417,9 +431,15 @@ def make_locator(page: Page, element: dict[str, Any]) -> Any:
     """Build a Playwright locator from a resolved element."""
     role = element.get("role")
     name = element.get("name")
-    return (
-        page.get_by_role(cast(Any, role), name=name) if name else page.get_by_role(cast(Any, role))
+    nth = element.get("nth")
+    loc = (
+        page.get_by_role(cast(Any, role), name=name, exact=True)
+        if name
+        else page.get_by_role(cast(Any, role))
     )
+    if nth is not None and nth > 0:
+        loc = loc.nth(nth)
+    return loc
 
 
 async def _click_with_overlay_retry(locator: Any, page: Page) -> None:

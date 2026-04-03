@@ -177,7 +177,19 @@ def _filter_within_scope(items: list[dict[str, Any]], within_query: str) -> list
                 break
 
     if container_idx is None:
-        return []  # Container not found
+        # Collect available landmark roles for a helpful error hint
+        _LANDMARK_ROLES = {"main", "navigation", "banner", "contentinfo", "complementary", "region", "search", "form"}
+        available = sorted({
+            item.get("role", "")
+            for item in items
+            if item.get("role", "") in _LANDMARK_ROLES
+        })
+        hint = f"No container matching '{within_query}' found."
+        if available:
+            hint += f" Available landmarks: {', '.join(available)}"
+        else:
+            hint += " No landmark roles found on this page."
+        return [{"_within_hint": hint}]
 
     # Collect the container and all its descendants
     result = [items[container_idx]]
@@ -220,6 +232,10 @@ async def extract_a11y_view(
 
     if options.within:
         items = _filter_within_scope(items, options.within)
+        # Check for hint from failed --within filter
+        if items and "_within_hint" in items[0]:
+            yield {"type": "warning", "message": items[0]["_within_hint"]}
+            return
 
     filter_config = SnapshotFilter(
         max_depth=options.max_depth,

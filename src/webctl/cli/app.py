@@ -374,7 +374,7 @@ def cmd_setup(
     browser_ok, browser_msg, fixes = check_playwright_browser(custom_path, allow_global)
 
     if browser_ok and not force:
-        print_success(f"✓ {browser_msg}")
+        print_success(f"[OK] {browser_msg}")
         print_success("webctl is ready to use!")
         return
 
@@ -408,7 +408,7 @@ def cmd_setup(
     console.print("[bold]Installing Chromium browser...[/bold]")
 
     if install_playwright_browser(custom_path):
-        print_success("✓ Chromium browser installed successfully")
+        print_success("[OK] Chromium browser installed successfully")
         console.print()
         print_success("webctl is ready to use!")
         console.print()
@@ -443,7 +443,7 @@ def cmd_doctor() -> None:
     py_version = sys.version_info
     if py_version >= (3, 11):
         console.print(
-            f"[green]✓[/green] Python {py_version.major}.{py_version.minor}.{py_version.micro}"
+            f"[green]OK[/green] Python {py_version.major}.{py_version.minor}.{py_version.micro}"
         )
     else:
         console.print(f"[red]✗[/red] Python {py_version.major}.{py_version.minor} (need 3.11+)")
@@ -453,7 +453,7 @@ def cmd_doctor() -> None:
     import importlib.util
 
     if importlib.util.find_spec("playwright"):
-        console.print("[green]✓[/green] Playwright installed")
+        console.print("[green]OK[/green] Playwright installed")
     else:
         console.print("[red]✗[/red] Playwright not installed")
         issues.append("Run: pip install playwright")
@@ -462,7 +462,7 @@ def cmd_doctor() -> None:
     custom_path, allow_global = resolve_browser_settings()
     browser_ok, browser_msg, fixes = check_playwright_browser(custom_path, allow_global)
     if browser_ok:
-        console.print(f"[green]✓[/green] {browser_msg}")
+        console.print(f"[green]OK[/green] {browser_msg}")
     else:
         console.print(f"[red]✗[/red] {browser_msg}")
         if fixes:
@@ -487,7 +487,7 @@ def cmd_doctor() -> None:
     # Domain policy
     if cfg.domain_policy.enabled:
         p = cfg.domain_policy.policy
-        console.print(f"[green]✓[/green] Domain policy: {p.mode} mode")
+        console.print(f"[green]OK[/green] Domain policy: {p.mode} mode")
         if p.allow_patterns:
             console.print(f"[dim]    Allow: {', '.join(p.allow_patterns)}[/dim]")
         if p.deny_patterns:
@@ -859,7 +859,7 @@ def cmd_init(
         else:
             success, message = _write_agent_config(filepath, content, is_skill, force)
             if success:
-                console.print(f"  [green]✓[/green] {config['name']:20} {message}")
+                console.print(f"  [green]OK[/green] {config['name']:20} {message}")
                 console.print(f"    [dim]{display_path}[/dim]")
                 results.append((agent_key, True))
             else:
@@ -890,11 +890,16 @@ def cmd_start(
         "-m",
         help="attended = visible browser, unattended = headless (default: from config)",
     ),
+    headed: bool = typer.Option(
+        False, "--headed", hidden=True, help="Alias for --mode attended"
+    ),
     auto_setup: bool = typer.Option(
         True, "--auto-setup/--no-auto-setup", help="Auto-install browser if missing"
     ),
 ) -> None:
     """Start a browser session."""
+    if headed and not mode:
+        mode = "attended"
     cfg = WebctlConfig.load()
     mode = mode or cfg.default_mode
 
@@ -955,9 +960,19 @@ def cmd_status(
 
 
 @app.command("save")
-def cmd_save() -> None:
-    """Save session state (cookies, localStorage) to disk."""
-    asyncio.run(run_command("session.save", {"session": _session}))
+def cmd_save(
+    name: str = typer.Argument(None, help="Profile name to save as (default: current session name)"),
+) -> None:
+    """Save session state (cookies, localStorage) to disk.
+
+    Examples:
+        webctl save              # Save to current session profile
+        webctl save teams-auth   # Save as 'teams-auth' profile
+    """
+    args: dict[str, Any] = {"session": _session}
+    if name:
+        args["save_as"] = name
+    asyncio.run(run_command("session.save", args))
 
 
 @app.command("sessions")
@@ -1010,6 +1025,12 @@ def cmd_navigate(
     grep: str | None = typer.Option(
         None, "--grep", "-g", help="Return a11y elements matching regex (implies --snapshot)"
     ),
+    mode: str | None = typer.Option(
+        None, "--mode", "-m", help="Session mode if auto-starting: attended (visible) or unattended (headless)"
+    ),
+    headed: bool = typer.Option(
+        False, "--headed", hidden=True, help="Alias for --mode attended"
+    ),
 ) -> None:
     """Navigate to a URL. Auto-starts session. Returns structured data + page summary.
 
@@ -1020,6 +1041,8 @@ def cmd_navigate(
         webctl navigate "https://example.com" --read              # readable markdown
         webctl navigate "https://duckduckgo.com" --search "query" # search + snapshot
     """
+    if headed and not mode:
+        mode = "attended"
     asyncio.run(
         run_command(
             "navigate",
@@ -1031,6 +1054,7 @@ def cmd_navigate(
                 "snapshot": snapshot,
                 "grep_pattern": grep,
                 "session": _session,
+                "mode": mode,
             },
         )
     )

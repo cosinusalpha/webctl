@@ -274,9 +274,12 @@ async def handle_wait(
         yield DoneResponse(req_id=request.req_id, ok=True)
 
     except TimeoutError:
+        error_msg = f"Timeout waiting for: {until}"
+        if until == "network-idle":
+            error_msg += ". Hint: for SPAs with persistent connections (WebSocket, SSE), use 'wait stable' instead"
         yield ErrorResponse(
             req_id=request.req_id,
-            error=f"Timeout waiting for: {until}",
+            error=error_msg,
             code="timeout",
         )
     except Exception as e:

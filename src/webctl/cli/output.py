@@ -113,12 +113,12 @@ class OutputFormatter:
             if self.color:
                 self._console.print(
                     f"[yellow]Large output: {total} elements. "
-                    f"Showing preview (first 20). Use --force for full output.[/yellow]"
+                    f"Showing preview (first 20). Use -F flag or -l N to control output.[/yellow]"
                 )
             else:
                 print(
                     f"Large output: {total} elements. "
-                    f"Showing preview (first 20). Use --force for full output."
+                    f"Showing preview (first 20). Use -F flag or -l N to control output."
                 )
             print()
             # Output only first 20 items
@@ -371,7 +371,7 @@ class OutputFormatter:
         """Output a session profile."""
         name = data.get("name", "")
         has_state = data.get("has_saved_state", False)
-        state_icon = "[green]●[/green]" if has_state else "[dim]○[/dim]"
+        state_icon = "[green]*[/green]" if has_state else "[dim]-[/dim]"
 
         if self.color:
             self._console.print(f"  {state_icon} [bold]{name}[/bold]")
@@ -389,22 +389,32 @@ class OutputFormatter:
         pages = data.get("pages", [])
         session_id = data.get("session_id", "")
         mode = data.get("mode", "")
+        url = data.get("url", "")
+        title = data.get("title", "")
 
         if self.color:
             self._console.print(f"Session: [bold]{session_id}[/bold] ({mode})")
+            if url:
+                self._console.print(f"URL: [cyan]{url}[/cyan]")
+            if title:
+                self._console.print(f"Title: {title}")
             self._console.print(f"Pages: {len(pages)}")
             for page in pages:
                 active = page.get("active", False)
-                icon = "[green]►[/green]" if active else " "
+                icon = "[green]>[/green]" if active else " "
                 page_id = page.get("page_id", "")
-                url = page.get("url", "")[:60]
-                self._console.print(f"  {icon} [cyan]{page_id}[/cyan] {url}")
+                page_url = page.get("url", "")[:80]
+                self._console.print(f"  {icon} [cyan]{page_id}[/cyan] {page_url}")
         else:
             print(f"Session: {session_id} ({mode})")
+            if url:
+                print(f"URL: {url}")
+            if title:
+                print(f"Title: {title}")
             print(f"Pages: {len(pages)}")
             for page in pages:
                 active = "*" if page.get("active") else " "
-                print(f"  {active} {page.get('page_id')} {page.get('url', '')[:60]}")
+                print(f"  {active} {page.get('page_id')} {page.get('url', '')[:80]}")
 
     def _output_status_brief(self, data: dict[str, Any]) -> None:
         """Output one-line status summary."""
@@ -447,7 +457,7 @@ class OutputFormatter:
             if details:
                 suggestions = details.get("suggestions", [])
                 for suggestion in suggestions:
-                    error_console.print(f"  [yellow]→[/yellow] {suggestion}")
+                    error_console.print(f"  [yellow]->[/yellow] {suggestion}")
                 similar = details.get("similar_elements", [])
                 if similar:
                     error_console.print("  [dim]Similar elements:[/dim]")
@@ -459,7 +469,7 @@ class OutputFormatter:
             print(f"ERROR [{code}] {error}", file=sys.stderr)
             if details:
                 for suggestion in details.get("suggestions", []):
-                    print(f"  → {suggestion}", file=sys.stderr)
+                    print(f"  -> {suggestion}", file=sys.stderr)
 
     def _output_done(self, data: dict[str, Any]) -> None:
         """Output done response."""

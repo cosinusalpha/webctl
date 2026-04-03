@@ -167,8 +167,9 @@ async def handle_navigate(
         return
 
     # Auto-start session if needed
+    mode = request.args.get("mode")
     try:
-        session = await session_manager.ensure_session(session_id)
+        session = await session_manager.ensure_session(session_id, mode=mode)
     except Exception as e:
         yield ErrorResponse(
             req_id=request.req_id,

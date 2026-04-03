@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.2] - 2026-04-03
+
+### Added
+
+- `save` now accepts an optional profile name (`webctl save <name>`) to persist session state under a reusable profile.
+- `navigate` now accepts `--mode` (and hidden `--headed` alias) to control session mode during auto-start.
+
+### Changed
+
+- Session `@ref` resolution is now more deterministic by preserving per-role/name `nth` indices and using exact role/name matching before fuzzy fallback.
+- `status` output now includes current URL and page title, and shows longer per-page URL previews.
+- CLI output wording and symbols were normalized for better terminal compatibility (for example `OK`, `->`, `*`, and `-`).
+- Truncated markdown messages now provide neutral display-limit wording instead of suggesting unsupported force behavior.
+- Skill documentation updated with `wait stable` guidance for SPAs, named profile saves, and mode-aware startup examples.
+
+### Fixed
+
+- `wait network-idle` timeout errors now include SPA-specific guidance to use `wait stable` when persistent connections keep the network active.
+- `--within` snapshot filtering now emits a helpful warning when no matching container is found, including available landmark roles when present.
+
 ## [0.4.1] - 2026-03-28
 
 ### Fixed

@@ -237,6 +237,7 @@ async def handle_session_save(
 ) -> AsyncIterator[Response]:
     """Save session state to disk."""
     session_id = request.args.get("session", "default")
+    save_as = request.args.get("save_as")
 
     session = session_manager.get_session(session_id)
     if not session:
@@ -248,16 +249,29 @@ async def handle_session_save(
         return
 
     try:
-        await session_manager.save_session(session_id)
-        yield DoneResponse(
-            req_id=request.req_id,
-            ok=True,
-            summary={
-                "session_id": session_id,
-                "profile_dir": str(session.profile_dir),
-                "message": "Session state saved",
-            },
-        )
+        if save_as:
+            # Save current session state under a different profile name
+            await session_manager.save_session_as(session_id, save_as)
+            yield DoneResponse(
+                req_id=request.req_id,
+                ok=True,
+                summary={
+                    "session_id": session_id,
+                    "saved_as": save_as,
+                    "message": f"Session state saved as '{save_as}'",
+                },
+            )
+        else:
+            await session_manager.save_session(session_id)
+            yield DoneResponse(
+                req_id=request.req_id,
+                ok=True,
+                summary={
+                    "session_id": session_id,
+                    "profile_dir": str(session.profile_dir),
+                    "message": "Session state saved",
+                },
+            )
     except Exception as e:
         yield ErrorResponse(req_id=request.req_id, error=f"Failed to save: {e}")
 

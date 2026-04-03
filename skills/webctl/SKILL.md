@@ -89,10 +89,17 @@ webctl press Tab
 
 ### wait - Wait for condition
 ```bash
-webctl wait network-idle
+webctl wait stable                                  # best for SPAs (DOM stabilization)
+webctl wait network-idle                            # for traditional page loads (avoid for SPAs with WebSocket/SSE)
 webctl wait 'exists:role=button name~="Continue"'
 webctl wait 'url-contains:"/dashboard"'
 webctl wait 'hidden:role=dialog'
+```
+
+### save - Save session state
+```bash
+webctl save                  # save to current session profile
+webctl save my-auth          # save as named profile (reusable with -s my-auth)
 ```
 
 ### stop - Close everything
@@ -103,8 +110,9 @@ webctl stop --keep-daemon    # only close browser
 
 ### start - Explicit session start (usually not needed)
 ```bash
-webctl start                         # visible browser
-webctl start --mode unattended       # headless
+webctl start                                  # visible browser
+webctl start --mode unattended                # headless
+webctl navigate URL --mode attended           # auto-start with visible browser
 ```
 
 ## Target Syntax
